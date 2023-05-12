@@ -60,7 +60,6 @@ if __name__ == '__main__':
         from tasks.msdp.evaluate import main
 
     else:
-        raise NotImplementedError('Task {} is not implemented.'.format(
-            args.task))
+        raise NotImplementedError(f'Task {args.task} is not implemented.')
 
     main()

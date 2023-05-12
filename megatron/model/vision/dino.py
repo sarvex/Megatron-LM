@@ -105,8 +105,8 @@ class DINOHead(torch.nn.Module):
     def _init_weights(self, m):
         if isinstance(m, torch.nn.Linear):
             trunc_normal_(m.weight, std=.02)
-            if isinstance(m, torch.nn.Linear) and m.bias is not None:
-                torch.nn.init.constant_(m.bias, 0)
+        if isinstance(m, torch.nn.Linear) and m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         x = self.mlp(x)
@@ -144,16 +144,10 @@ class MultiCropWrapper(MegatronModule):
         start_idx = 0
         for end_idx in idx_crops:
             _out = self.backbone(torch.cat(x[start_idx: end_idx]))
-            if start_idx == 0:
-                output = _out
-            else:
-                output = torch.cat((output, _out))
+            output = _out if start_idx == 0 else torch.cat((output, _out))
             start_idx = end_idx
         # Run the head forward on the concatenated features.
-        if self.training:
-            return self.head(output)
-        else:
-            return output
+        return self.head(output) if self.training else output
 
 
 def cosine_scheduler(base_value, final_value, epochs, niter_per_ep,
@@ -189,9 +183,10 @@ def get_student_backbone_and_num_features(pre_process=True, post_process=True):
         student = get_swin()
         num_features = student.num_features
     else:
-        raise Exception('{} vision backbone is not supported.'.format(
-                              args.vision_backbone_type))
- 
+        raise Exception(
+            f'{args.vision_backbone_type} vision backbone is not supported.'
+        )
+
     return student, num_features
 
 def get_teacher_backbone_and_num_features(pre_process=True, post_process=True):
@@ -209,8 +204,9 @@ def get_teacher_backbone_and_num_features(pre_process=True, post_process=True):
         teacher = get_swin(is_teacher=True)
         num_features = teacher.num_features
     else:
-        raise Exception('{} vision backbone is not supported.'.format(
-                              args.vision_backbone_type))
+        raise Exception(
+            f'{args.vision_backbone_type} vision backbone is not supported.'
+        )
     return teacher, num_features
 
 

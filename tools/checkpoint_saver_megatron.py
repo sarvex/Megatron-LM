@@ -61,8 +61,9 @@ def save_checkpoint(queue, args):
             print(f"Unexpected values in {msg_name}:")
             for key in msg.keys():
                 print(f"   {key}")
-            print(f"Exiting. If you want to ignore this, use the argument --no-checking.")
+            print("Exiting. If you want to ignore this, use the argument --no-checking.")
             exit(1)
+
 
 
     md = queue_get()

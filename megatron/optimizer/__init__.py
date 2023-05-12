@@ -34,16 +34,12 @@ def get_param_groups(modules,
                 # do not regularize biases nor Norm parameters
                 no_wd = name.endswith(".bias") or len(param.shape) == 1
 
-            if scale_lr_cond is not None:
-                scale_lr = scale_lr_cond(name, param)
-            else:
-                scale_lr = False
-
+            scale_lr = scale_lr_cond(name, param) if scale_lr_cond is not None else False
             if not no_wd and not scale_lr:
                 wd_no_scale_lr.append(param)
-            elif not no_wd and scale_lr:
+            elif not no_wd:
                 wd_scale_lr.append(param)
-            elif no_wd and not scale_lr:
+            elif not scale_lr:
                 no_wd_no_scale_lr.append(param)
             else:
                 no_wd_scale_lr.append(param)
@@ -84,14 +80,9 @@ def get_megatron_optimizer(model,
                         weight_decay=args.weight_decay,
                         momentum=args.sgd_momentum)
     else:
-        raise Exception('{} optimizer is not supported.'.format(
-            args.optimizer))
+        raise Exception(f'{args.optimizer} optimizer is not supported.')
 
-    # Determine whether the params have main-grad field.
-    params_have_main_grad = False
-    if args.DDP_impl == 'local':
-        params_have_main_grad = True
-
+    params_have_main_grad = args.DDP_impl == 'local'
     # Mixed precision optimizer.
     # - Note: both the Float16Optimizer and the DistributedOptimizer inherit
     #   from the MixedPrecisionOptimizer, which manages any optimizer where
@@ -110,16 +101,14 @@ def get_megatron_optimizer(model,
         if args.loss_scale:
             grad_scaler = ConstantGradScaler(args.loss_scale)
 
-        # Dynamic loss scale.
-        else:
-            if args.fp16:
-                grad_scaler = DynamicGradScaler(
-                    initial_scale=args.initial_loss_scale,
-                    min_scale=args.min_loss_scale,
-                    growth_factor=2.0,
-                    backoff_factor=0.5,
-                    growth_interval=args.loss_scale_window,
-                    hysteresis=args.hysteresis)
+        elif args.fp16:
+            grad_scaler = DynamicGradScaler(
+                initial_scale=args.initial_loss_scale,
+                min_scale=args.min_loss_scale,
+                growth_factor=2.0,
+                backoff_factor=0.5,
+                growth_interval=args.loss_scale_window,
+                hysteresis=args.hysteresis)
 
         # Megatron optimizer.
         opt_ty = DistributedOptimizer \

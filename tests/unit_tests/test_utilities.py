@@ -14,7 +14,7 @@ class Utils:
         init_method = 'tcp://'
         master_ip = os.getenv('MASTER_ADDR', 'localhost')
         master_port = os.getenv('MASTER_PORT', '6000')
-        init_method += master_ip + ':' + master_port
+        init_method += f'{master_ip}:{master_port}'
         torch.distributed.init_process_group(backend='nccl', world_size=Utils.world_size, rank=Utils.rank, init_method=init_method)
         
     @staticmethod

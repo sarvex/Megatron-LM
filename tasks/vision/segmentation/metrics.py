@@ -84,8 +84,7 @@ def _get_weights(y_true, nb_ch):
     """
     batch_size, img_rows, img_cols = y_true.shape
     pixels = batch_size * img_rows * img_cols
-    weights = [torch.sum(y_true==ch).item() / pixels for ch in range(nb_ch)]
-    return weights
+    return [torch.sum(y_true==ch).item() / pixels for ch in range(nb_ch)]
 
 
 class CFMatrix(object):
@@ -131,7 +130,7 @@ class CFMatrix(object):
                 nb_tn = torch.sum(y_false_ch * (1 - y_pred_ch)).float()
                 nb_fn = _get_fn(y_pred_ch, y_true_ch)
                 performs[int(ch), :] = torch.FloatTensor([nb_tp, nb_fp, nb_tn, nb_fn])
-            mperforms = sum([i*j for (i, j) in zip(performs, weights)])
+            mperforms = sum(i*j for (i, j) in zip(performs, weights))
         return mperforms, performs
 
 
@@ -202,7 +201,7 @@ class Precision(object):
                 nb_tp = _get_tp(y_pred_ch, y_true_ch)
                 nb_fp = _get_fp(y_pred_ch, y_true_ch)
                 performs[int(ch)] = nb_tp / (nb_tp + nb_fp + esp)
-            mperforms = sum([i*j for (i, j) in zip(performs, weights)])
+            mperforms = sum(i*j for (i, j) in zip(performs, weights))
         return mperforms, performs
 
 
@@ -243,7 +242,7 @@ class Recall(object):
                 nb_tp = _get_tp(y_pred_ch, y_true_ch)
                 nb_fn = _get_fn(y_pred_ch, y_true_ch)
                 performs[int(ch)] = nb_tp / (nb_tp + nb_fn + esp)
-            mperforms = sum([i*j for (i, j) in zip(performs, weights)])
+            mperforms = sum(i*j for (i, j) in zip(performs, weights))
         return mperforms, performs
 
 
@@ -291,8 +290,8 @@ class F1Score(object):
                 _precision = nb_tp / (nb_tp + nb_fp + esp)
                 _recall = nb_tp / (nb_tp + nb_fn + esp)
                 performs[int(ch)] = 2 * _precision * \
-                    _recall / (_precision + _recall + esp)
-            mperforms = sum([i*j for (i, j) in zip(performs, weights)])
+                        _recall / (_precision + _recall + esp)
+            mperforms = sum(i*j for (i, j) in zip(performs, weights))
         return mperforms, performs
 
 
@@ -346,7 +345,7 @@ class Kappa(object):
                 Pe = ((nb_tp + nb_fp) * (nb_tp + nb_fn)
                       + (nb_fn + nb_tn) * (nb_fp + nb_tn)) / (nb_total**2)
                 performs[int(ch)] = (Po - Pe) / (1 - Pe + esp)
-            mperforms = sum([i*j for (i, j) in zip(performs, weights)])
+            mperforms = sum(i*j for (i, j) in zip(performs, weights))
         return mperforms, performs
 
 
@@ -387,7 +386,7 @@ class Jaccard(object):
                 _intersec = torch.sum(y_true_ch * y_pred_ch).float()
                 _sum = torch.sum(y_true_ch + y_pred_ch).float()
                 performs[int(ch)] = _intersec / (_sum - _intersec + esp)
-            mperforms = sum([i*j for (i, j) in zip(performs, weights)])
+            mperforms = sum(i*j for (i, j) in zip(performs, weights))
         return mperforms, performs
 
 
@@ -449,8 +448,7 @@ class SSIM(object):
     def create_window(self, w_size, channel=1):
         _1D_window = self.gaussian(w_size, 1.5).unsqueeze(1)
         _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
-        window = _2D_window.expand(channel, 1, w_size, w_size).contiguous()
-        return window
+        return _2D_window.expand(channel, 1, w_size, w_size).contiguous()
 
     def __call__(self, y_pred, y_true, w_size=11, size_average=True, full=False):
         """
@@ -463,15 +461,8 @@ class SSIM(object):
         return ssim, larger the better
         """
         # Value range can be different from 255. Other common ranges are 1 (sigmoid) and 2 (tanh).
-        if torch.max(y_pred) > 128:
-            max_val = 255
-        else:
-            max_val = 1
-
-        if torch.min(y_pred) < -0.5:
-            min_val = -1
-        else:
-            min_val = 0
+        max_val = 255 if torch.max(y_pred) > 128 else 1
+        min_val = -1 if torch.min(y_pred) < -0.5 else 0
         L = max_val - min_val
 
         padd = 0
@@ -498,14 +489,8 @@ class SSIM(object):
 
         ssim_map = ((2 * mu1_mu2 + C1) * v1) / ((mu1_sq + mu2_sq + C1) * v2)
 
-        if size_average:
-            ret = ssim_map.mean()
-        else:
-            ret = ssim_map.mean(1).mean(1).mean(1)
-
-        if full:
-            return ret, cs
-        return ret
+        ret = ssim_map.mean() if size_average else ssim_map.mean(1).mean(1).mean(1)
+        return (ret, cs) if full else ret
 
 
 class AE(object):
@@ -545,28 +530,28 @@ if __name__ == "__main__":
                 y_pred = y_pred.cuda()
                 y_true = y_true.cuda()
 
-            print('#'*20, 'Cuda : {} ; size : {}'.format(cuda, y_true.size()))
+            print('#'*20, f'Cuda : {cuda} ; size : {y_true.size()}')
             ########### similarity metrics
             metric = MSE()
             acc = metric(y_pred, y_true).item()
-            print("{} ==> {}".format(repr(metric), acc))
+            print(f"{repr(metric)} ==> {acc}")
 
             metric = PSNR()
             acc = metric(y_pred, y_true).item()
-            print("{} ==> {}".format(repr(metric), acc))
+            print(f"{repr(metric)} ==> {acc}")
 
             metric = SSIM()
             acc = metric(y_pred, y_true).item()
-            print("{} ==> {}".format(repr(metric), acc))
-                  
+            print(f"{repr(metric)} ==> {acc}")
+
             metric = LPIPS(cuda)
             acc = metric(y_pred, y_true).item()
-            print("{} ==> {}".format(repr(metric), acc))
-            
+            print(f"{repr(metric)} ==> {acc}")
+
             metric = AE()
             acc = metric(y_pred, y_true).item()
-            print("{} ==> {}".format(repr(metric), acc))
-            
+            print(f"{repr(metric)} ==> {acc}")
+
             ########### accuracy metrics
             metric = OAAcc()
             maccu, accu = metric(y_pred, y_true)

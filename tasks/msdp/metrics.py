@@ -50,9 +50,9 @@ class F1Metric:
 
     @staticmethod
     def compute_each_pair(guess: str, answer: str):
-        if answer == "":
+        if not answer:
             return None, None, None
-        if guess == "":
+        if not guess:
             return 0, 0, 0
         g_tokens = normalize_answer(guess).split()
         a_tokens = normalize_answer(answer).split()

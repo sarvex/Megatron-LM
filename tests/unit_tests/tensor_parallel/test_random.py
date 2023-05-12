@@ -20,8 +20,8 @@ def test_cuda_rng_states_tracker():
         assert(rng_tracker.add("state2",111))
     assert(rng_tracker.get_states()['state2'] is not None)
     with pytest.raises(Exception):
-        assert()
-    
+        assert False
+
     rng_tracker.fork("state2")
     torch.cuda.manual_seed(seed)
     rng_state = torch.cuda.get_rng_state()

@@ -72,7 +72,7 @@ class PerspectiveApiScorer:
 
 def test():
     scorer = PerspectiveApiScorer()
-    for i in range(1):
+    for _ in range(1):
         print(scorer.get_scores("toxic behaviors and nasty negro"))
 
 
@@ -153,15 +153,14 @@ def get_annotated_datasets(lines, threads=10):
     print(len(sub_lines))
     final = Parallel(n_jobs=threads)(delayed(get_score)(l) for l in splitted_lines)
     import itertools
-    finals = list(itertools.chain.from_iterable(final))
-    return finals
+    return list(itertools.chain.from_iterable(final))
 
 
 def main():
     args = parser.parse_args()
 
     path = args.data_path
-    out = args.out_path if args.out_path else path + '-annotated.jsonl'
+    out = args.out_path if args.out_path else f'{path}-annotated.jsonl'
     print(out)
 
     fin = open(path, 'r', encoding='utf-8')

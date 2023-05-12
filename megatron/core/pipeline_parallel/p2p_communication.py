@@ -86,7 +86,7 @@ def _communicate_shapes(tensor_send_next, tensor_send_prev,
                 torch.distributed.irecv, recv_next_shape_tensor,
                 mpu.get_pipeline_model_parallel_next_rank())
             ops.append(recv_next_op)
-        if len(ops) > 0:
+        if ops:
             reqs = torch.distributed.batch_isend_irecv(ops)
             for req in reqs:
                 req.wait()
@@ -231,7 +231,7 @@ def _communicate(*, tensor_send_next: Optional[torch.Tensor],
                 torch.distributed.irecv, tensor_recv_next,
                 get_pipeline_model_parallel_next_rank())
             ops.append(recv_next_op)
-        if len(ops) > 0:
+        if ops:
             reqs = torch.distributed.batch_isend_irecv(ops)
             for req in reqs:
                 req.wait()

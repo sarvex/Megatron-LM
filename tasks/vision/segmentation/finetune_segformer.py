@@ -91,7 +91,7 @@ def segmentation():
         logits = output_tensor.contiguous().float()
         logits = resize(logits, size=masks.shape[1:],
                         mode='bilinear', align_corners=False)
-      
+
         # Cross-entropy loss.
         # weight = calculate_weight(masks, num_classes)
         loss = F.cross_entropy(logits, masks, ignore_index=ignore_index)
@@ -113,10 +113,7 @@ def segmentation():
         # Get the batch.
         timers("batch generator", log_level=2).start()
         import types
-        if isinstance(batch, types.GeneratorType):
-            batch_ = next(batch)
-        else:
-            batch_ = batch
+        batch_ = next(batch) if isinstance(batch, types.GeneratorType) else batch
         images, masks = process_batch(batch_)
         timers("batch generator").stop()
 

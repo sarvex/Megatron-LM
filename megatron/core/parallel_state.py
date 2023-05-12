@@ -127,7 +127,7 @@ def initialize_model_parallel(
     num_data_parallel_groups: int = world_size // data_parallel_size
 
     if virtual_pipeline_model_parallel_size is not None:
-        if not pipeline_model_parallel_size > 2:
+        if pipeline_model_parallel_size <= 2:
             raise RuntimeError("pipeline-model-parallel size should be greater than 2 with "
                                "interleaved schedule")
         global _VIRTUAL_PIPELINE_MODEL_PARALLEL_RANK
@@ -240,11 +240,11 @@ def is_unitialized():
 
 def model_parallel_is_initialized():
     """Check if model and data parallel groups are initialized."""
-    if _TENSOR_MODEL_PARALLEL_GROUP is None or \
-        _PIPELINE_MODEL_PARALLEL_GROUP is None or \
-        _DATA_PARALLEL_GROUP is None:
-        return False
-    return True
+    return (
+        _TENSOR_MODEL_PARALLEL_GROUP is not None
+        and _PIPELINE_MODEL_PARALLEL_GROUP is not None
+        and _DATA_PARALLEL_GROUP is not None
+    )
 
 
 def get_model_parallel_group():
@@ -359,10 +359,12 @@ def get_pipeline_model_parallel_split_rank():
 
 def is_pipeline_first_stage(ignore_virtual=False):
     """Return True if in the first pipeline model-parallel stage, False otherwise."""
-    if not ignore_virtual:
-        if get_virtual_pipeline_model_parallel_world_size() is not None and \
-            get_virtual_pipeline_model_parallel_rank() != 0:
-            return False
+    if (
+        not ignore_virtual
+        and get_virtual_pipeline_model_parallel_world_size() is not None
+        and get_virtual_pipeline_model_parallel_rank() != 0
+    ):
+        return False
     return get_pipeline_model_parallel_rank() == 0
 
 
@@ -412,9 +414,7 @@ def is_pipeline_stage_before_split(rank=None):
     global _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
     if _PIPELINE_MODEL_PARALLEL_SPLIT_RANK is None:
         return True
-    if rank < _PIPELINE_MODEL_PARALLEL_SPLIT_RANK:
-        return True
-    return False
+    return rank < _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
 
 
 def is_pipeline_stage_after_split(rank=None):
@@ -427,9 +427,7 @@ def is_pipeline_stage_after_split(rank=None):
     global _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
     if _PIPELINE_MODEL_PARALLEL_SPLIT_RANK is None:
         return True
-    if rank >= _PIPELINE_MODEL_PARALLEL_SPLIT_RANK:
-        return True
-    return False
+    return rank >= _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
 
 
 def is_pipeline_stage_at_split():

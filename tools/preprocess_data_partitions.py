@@ -53,7 +53,7 @@ class Encoder(object):
             if not nltk_available:
                 print("NLTK is not available to split sentences.")
                 exit()
-            library = "tokenizers/punkt/{}.pickle".format(self.args.lang)
+            library = f"tokenizers/punkt/{self.args.lang}.pickle"
             splitter = nltk.load(library)
             if self.args.keep_newlines:
                 # this prevents punkt from eating newlines after sentences
@@ -82,10 +82,7 @@ class Encoder(object):
         lens = {}
         for key in self.args.json_keys:
             text = data[key]
-            if isinstance(text, list):
-                sentences = text
-            else:
-                sentences = [text]
+            sentences = text if isinstance(text, list) else [text]
             doc_ids = []
             sentence_lens = []
             for sentence in sentences:
@@ -93,7 +90,7 @@ class Encoder(object):
                 if len(sentence_ids) > 0:
                     doc_ids.extend(sentence_ids)
                     sentence_lens.append(len(sentence_ids))
-            if len(doc_ids) > 0 and self.args.append_eod:
+            if doc_ids and self.args.append_eod:
                 doc_ids.append(Encoder.tokenizer.eod)
             ids[key] = doc_ids
             lens[key] = sentence_lens
@@ -117,63 +114,55 @@ class Partition(object):
     def split_sentences(self, file_name):
         input_file_name, output_file_name = file_name
         print("Opening", input_file_name)
-        fin = open(input_file_name, 'r', encoding='utf-8')
-        fout = open(output_file_name, 'w')
+        with open(input_file_name, 'r', encoding='utf-8') as fin:
+            fout = open(output_file_name, 'w')
 
-        encoder = Encoder(self.args)
-        pool = multiprocessing.Pool(self.workers, initializer=encoder.initializer)
-        split_docs = pool.imap(encoder.split, fin, 32)
+            encoder = Encoder(self.args)
+            pool = multiprocessing.Pool(self.workers, initializer=encoder.initializer)
+            split_docs = pool.imap(encoder.split, fin, 32)
 
-        proc_start = time.time()
-        total_bytes_processed = 0
-        for i, (doc, bytes_processed) in enumerate(split_docs, start=1):
-            total_bytes_processed += bytes_processed
-            fout.write(doc + "\n")
-            self.print_processing_stats(i, proc_start, total_bytes_processed)
+            proc_start = time.time()
+            total_bytes_processed = 0
+            for i, (doc, bytes_processed) in enumerate(split_docs, start=1):
+                total_bytes_processed += bytes_processed
+                fout.write(doc + "\n")
+                self.print_processing_stats(i, proc_start, total_bytes_processed)
 
-        fin.close()
         fout.close()
 
 
     def process_json_file(self, file_name):
         input_file_name, output_prefix = file_name
         print("Opening", input_file_name)
-        fin = open(input_file_name, 'r', encoding='utf-8')
+        with open(input_file_name, 'r', encoding='utf-8') as fin:
+            startup_start = time.time()
+            encoder = Encoder(self.args)
+            tokenizer = build_tokenizer(self.args)
+            pool = multiprocessing.Pool(self.workers, initializer=encoder.initializer)
+            encoded_docs = pool.imap(encoder.encode, fin, 32)
 
-        startup_start = time.time()
-        encoder = Encoder(self.args)
-        tokenizer = build_tokenizer(self.args)
-        pool = multiprocessing.Pool(self.workers, initializer=encoder.initializer)
-        encoded_docs = pool.imap(encoder.encode, fin, 32)
+            level = "sentence" if self.args.split_sentences else "document"
+            output_bin_files = {}
+            output_idx_files = {}
+            builders = {}
 
-        level = "document"
-        if self.args.split_sentences:
-            level = "sentence"
+            for key in self.args.json_keys:
+                output_bin_files[key] = f"{output_prefix}_{key}_{level}.bin"
+                output_idx_files[key] = f"{output_prefix}_{key}_{level}.idx"
+                builders[key] = indexed_dataset.make_builder(output_bin_files[key],
+                                                       impl=self.args.dataset_impl,
+                                                       vocab_size=tokenizer.vocab_size)
 
-        output_bin_files = {}
-        output_idx_files = {}
-        builders = {}
+            startup_end = time.time()
+            proc_start = time.time()
+            total_bytes_processed = 0
+            print("Time to startup:", startup_end - startup_start)
+            for i, (doc, sentence_lens, bytes_processed) in enumerate(encoded_docs, start=1):
+                total_bytes_processed += bytes_processed
+                for key in doc.keys():
+                    builders[key].add_doc(doc[key], sentence_lens[key])
+                self.print_processing_stats(i, proc_start, total_bytes_processed)
 
-        for key in self.args.json_keys:
-            output_bin_files[key] = "{}_{}_{}.bin".format(output_prefix,
-                                                          key, level)
-            output_idx_files[key] = "{}_{}_{}.idx".format(output_prefix,
-                                                          key, level)
-            builders[key] = indexed_dataset.make_builder(output_bin_files[key],
-                                                   impl=self.args.dataset_impl,
-                                                   vocab_size=tokenizer.vocab_size)
-
-        startup_end = time.time()
-        proc_start = time.time()
-        total_bytes_processed = 0
-        print("Time to startup:", startup_end - startup_start)
-        for i, (doc, sentence_lens, bytes_processed) in enumerate(encoded_docs, start=1):
-            total_bytes_processed += bytes_processed
-            for key in doc.keys():
-                builders[key].add_doc(doc[key], sentence_lens[key])
-            self.print_processing_stats(i, proc_start, total_bytes_processed)
-        
-        fin.close()
         builders[key].finalize(output_idx_files[key])
 
 
@@ -234,21 +223,20 @@ def get_args():
 
 def get_file_name(args, file_id):
     file_name, extension = os.path.splitext(args.input)
-    input_file_name = file_name + "_" + str(file_id) + extension
-    sentence_split_file = file_name + "_ss_" + str(file_id) + extension
-    output_prefix = args.output_prefix + "_" + str(file_id)
-    file_names = {
+    input_file_name = f"{file_name}_{str(file_id)}{extension}"
+    sentence_split_file = f"{file_name}_ss_{str(file_id)}{extension}"
+    output_prefix = f"{args.output_prefix}_{str(file_id)}"
+    return {
         'partition': input_file_name,
         'sentence_split': sentence_split_file,
-        'output_prefix': output_prefix}
-    return file_names
+        'output_prefix': output_prefix,
+    }
 
 
 def check_files_exist(in_ss_out_names, key, num_partitions):
-    for i in range(num_partitions):
-        if not os.path.exists(in_ss_out_names[i][key]):
-            return False
-    return True
+    return all(
+        os.path.exists(in_ss_out_names[i][key]) for i in range(num_partitions)
+    )
 
 
 def main():
@@ -264,7 +252,7 @@ def main():
     in_ss_out_names = []
     if args.partitions == 1:
         file_name, extension = os.path.splitext(args.input)
-        sentence_split_file = file_name + "_ss" + extension
+        sentence_split_file = f"{file_name}_ss{extension}"
         file_names = {
             'partition': args.input,
             'sentence_split': sentence_split_file,
@@ -342,28 +330,21 @@ def main():
     for p in processes:
         p.join()
 
-    # merge bin/idx partitions
-    level = "document"
-    if args.split_sentences:
-        level = "sentence"
-
+    level = "sentence" if args.split_sentences else "document"
     output_bin_files = {}
     output_idx_files = {}
     builders = {}
     tokenizer = build_tokenizer(args)
 
     for key in args.json_keys:
-        output_bin_files[key] = "{}_{}_{}.bin".format(args.output_prefix,
-                                                      key, level)
-        output_idx_files[key] = "{}_{}_{}.idx".format(args.output_prefix,
-                                                      key, level)
+        output_bin_files[key] = f"{args.output_prefix}_{key}_{level}.bin"
+        output_idx_files[key] = f"{args.output_prefix}_{key}_{level}.idx"
         builders[key] = indexed_dataset.make_builder(output_bin_files[key],
                                                      impl=args.dataset_impl,
                                                      vocab_size=tokenizer.vocab_size)
         for name in in_ss_out_names:
             parition_output_prefix = name['output_prefix']
-            full_partition_output_prefix = "{}_{}_{}".format(parition_output_prefix,
-                                                             key, level)
+            full_partition_output_prefix = f"{parition_output_prefix}_{key}_{level}"
             builders[key].merge_file_(full_partition_output_prefix)
         builders[key].finalize(output_idx_files[key])
 

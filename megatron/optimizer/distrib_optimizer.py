@@ -154,16 +154,13 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                                                                dtype,
                                                                gbuf_world_range)
 
-        # Group into dict.
-        data = {
-            "local" : gbuf_local_range,
-            "world" : gbuf_world_range,
-            "world_all" : gbuf_world_all_ranges,
-            "param_map" : param_range_map,
-            "max_range_size" : max_gbuf_range_size,
+        return {
+            "local": gbuf_local_range,
+            "world": gbuf_world_range,
+            "world_all": gbuf_world_all_ranges,
+            "param_map": param_range_map,
+            "max_range_size": max_gbuf_range_size,
         }
-
-        return data
 
 
     @classmethod
@@ -287,7 +284,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
 
                     # Clone model -> main.
                     shard_model_param = model_param.detach().view(-1) \
-                        [param_range.start:param_range.end]
+                            [param_range.start:param_range.end]
                     shard_main_param = shard_model_param.clone().float()
                     tensor_parallel.copy_tensor_model_parallel_attributes(
                         shard_model_param, model_param)
@@ -302,10 +299,9 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                     shard_float16_params_this_group.append(shard_model_param)
                     shard_fp32_from_float16_params_this_group.append(shard_main_param)
 
-                # fp32 params.
                 elif model_param.type() == 'torch.cuda.FloatTensor':
                     shard_model_param = model_param.view(-1) \
-                        [param_range.start:param_range.end]
+                            [param_range.start:param_range.end]
                     model_fp32_params_this_group.append(model_param)
                     shard_fp32_params_this_group.append(shard_model_param)
                     tensor_parallel.copy_tensor_model_parallel_attributes(
@@ -314,11 +310,9 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                         shard_model_param.shared = model_param.shared
 
                 else:
-                    raise TypeError('Wrapped parameters must be one of '
-                                    'torch.cuda.FloatTensor,  '
-                                    'torch.cuda.HalfTensor, or '
-                                    'torch.cuda.BFloat16Tensor. '
-                                    'Received {}'.format(param.type()))
+                    raise TypeError(
+                        f'Wrapped parameters must be one of torch.cuda.FloatTensor,  torch.cuda.HalfTensor, or torch.cuda.BFloat16Tensor. Received {param.type()}'
+                    )
 
             # Update optimizer's params.
             group_range["orig_group"]["params"] = [
@@ -359,10 +353,11 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
 
         # Model grad buffer ranges.
         self.model_gbuf_ranges = []
-        for model_index, model in enumerate(self.models):
-            self.model_gbuf_ranges.append(self.build_model_gbuf_range_map(model))
+        self.model_gbuf_ranges.extend(
+            self.build_model_gbuf_range_map(model) for model in self.models
+        )
         self.model_param_gbuf_map = \
-            self.build_model_param_gbuf_map(self.model_gbuf_ranges)
+                self.build_model_param_gbuf_map(self.model_gbuf_ranges)
 
         # Optimizer ranges.
         self.opt_group_ranges = self.build_optimizer_group_ranges(
@@ -385,7 +380,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         #   storage & have their own dtype. This is safe because the param
         #   dtype size is always <= grad dtype size.
         self.param_buffers = []
-        for model_index, model in enumerate(self.models):
+        for model in self.models:
             current_param_buffers = {}
             for dtype, grad_buffer in model._grad_buffers.items():
                 param_buffer = torch.tensor(grad_buffer.data.storage()._untyped(),
@@ -399,7 +394,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         # - Also, leverage state_dict() and load_state_dict() to
         #   recast preexisting per-param state tensors.
         self.optimizer.param_groups = \
-            [ g["orig_group"] for g in self.opt_group_ranges ]
+                [ g["orig_group"] for g in self.opt_group_ranges ]
         self.optimizer.load_state_dict(self.optimizer.state_dict())
 
 
@@ -410,8 +405,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         """
         model_index, dtype = self.model_param_gbuf_map[param]
         gbuf_range_map = self.model_gbuf_ranges[model_index][dtype]
-        param_range_map = gbuf_range_map["param_map"][param]
-        return param_range_map
+        return gbuf_range_map["param_map"][param]
 
 
     def get_model_parallel_group(self):
@@ -426,12 +420,11 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         """
         The state dict must contain the fp32-from-float16 shards.
         """
-        state_dict = {}
-        state_dict['optimizer'] = self.optimizer.state_dict()
+        state_dict = {'optimizer': self.optimizer.state_dict()}
         if self.grad_scaler:
             state_dict['grad_scaler'] = self.grad_scaler.state_dict()
         state_dict['shard_fp32_from_float16_groups'] = \
-            self.shard_fp32_from_float16_groups
+                self.shard_fp32_from_float16_groups
         return state_dict
 
 
@@ -449,11 +442,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         self.optimizer.load_state_dict(state_dict[optimizer_key])
 
         # Grad scaler.
-        if 'grad_scaler' not in state_dict:
-            if self.fp16:
-                print_rank_0('***WARNING*** found an old checkpoint, will not '
-                             'load grad scaler ...')
-        else:
+        if 'grad_scaler' in state_dict:
             if self.grad_scaler:
                 self.grad_scaler.load_state_dict(state_dict['grad_scaler'])
             else:
@@ -461,6 +450,9 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                              'checkpoint but it is None in the class. '
                              'Skipping loading grad scaler ...')
 
+        elif self.fp16:
+            print_rank_0('***WARNING*** found an old checkpoint, will not '
+                         'load grad scaler ...')
         # Copy data for the main params.
         for current_group, saved_group in zip(
                 self.shard_fp32_from_float16_groups,
@@ -571,9 +563,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
 
         # Reduce-scatter all grads.
         gbuf_view_items = self.get_model_grad_buffer_dp_views()
-        for index, (model_index, dtype, gbuf, gbuf_views) \
-            in enumerate(gbuf_view_items):
-
+        for model_index, dtype, gbuf, gbuf_views in gbuf_view_items:
             torch.distributed._reduce_scatter_base(
                 gbuf_views[data_parallel_rank],
                 gbuf,
@@ -605,9 +595,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         #   all sub-views will have consistent start/end indexes across data
         #   parallel ranks.
         pbuf_view_items = self.get_model_param_buffer_dp_views()
-        for index, (model_index, dtype, pbuf, pbuf_views) \
-            in enumerate(pbuf_view_items):
-
+        for model_index, dtype, pbuf, pbuf_views in pbuf_view_items:
             torch.distributed._all_gather_base(
                 pbuf,
                 pbuf_views[data_parallel_rank],

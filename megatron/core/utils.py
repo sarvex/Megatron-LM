@@ -9,9 +9,9 @@ from megatron.core import parallel_state
 
 def ensure_divisibility(numerator, denominator):
     """Ensure that numerator is divisible by the denominator."""
-    assert numerator % denominator == 0, "{} is not divisible by {}".format(
-        numerator, denominator
-    )
+    assert (
+        numerator % denominator == 0
+    ), f"{numerator} is not divisible by {denominator}"
 
 
 def divide(numerator, denominator):
@@ -47,14 +47,14 @@ class GlobalMemoryBuffer:
     def get_tensor(self, tensor_shape, dtype, name):
         required_len = reduce(operator.mul, tensor_shape, 1)
         if self.buffer.get((name, dtype), None) is None or \
-                self.buffer[(name, dtype)].numel() < required_len:
+                    self.buffer[(name, dtype)].numel() < required_len:
             self.buffer[(name, dtype)] = \
-                torch.empty(required_len,
+                    torch.empty(required_len,
                             dtype=dtype,
                             device=torch.cuda.current_device(),
                             requires_grad=False)
 
-        return self.buffer[(name, dtype)][0:required_len].view(*tensor_shape)
+        return self.buffer[(name, dtype)][:required_len].view(*tensor_shape)
 
 def _kernel_make_viewless_tensor(inp, requires_grad):
     '''Make a viewless tensor.
@@ -131,5 +131,8 @@ def safely_set_viewless_tensor_data(tensor, new_data_tensor):
     Check first that the tensor is viewless (i.e., '._base' not set). If not,
     raise an exception.
     '''
-    assert_viewless_tensor(tensor, extra_msg = "FYI, tensor._base has shape %s, and new_data_tensor has shape %s." % ("--" if tensor._base is None else tensor._base.shape, new_data_tensor.shape))
+    assert_viewless_tensor(
+        tensor,
+        extra_msg=f'FYI, tensor._base has shape {"--" if tensor._base is None else tensor._base.shape}, and new_data_tensor has shape {new_data_tensor.shape}.',
+    )
     tensor.data = new_data_tensor

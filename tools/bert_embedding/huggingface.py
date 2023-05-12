@@ -17,8 +17,7 @@ class IterableTextDataset(torch.utils.data.IterableDataset):
         '''Remove 'endoftext' string.'''
         for sample_idx in range(len(self.text_dataset)):
             sample = self.text_dataset[sample_idx]
-            text = sample["text"].replace("<|endoftext|>", "")
-            yield text
+            yield sample["text"].replace("<|endoftext|>", "")
 
 
 class MyFeatureExtractionPipeline(transformers.FeatureExtractionPipeline):
@@ -42,13 +41,10 @@ class MyFeatureExtractionPipeline(transformers.FeatureExtractionPipeline):
 
             outputs.append(output)
 
-        # Sample.
-        data = {
-            "input" : model_inputs["input_ids"],
-            "output" : outputs,
+        return {
+            "input": model_inputs["input_ids"],
+            "output": outputs,
         }
-
-        return data
 
     def postprocess(self, model_outputs):
         # Return input for analysis.
@@ -86,20 +82,16 @@ class HuggingfaceEmbedder:
         # Allocate output array.
         n_samples = len(text_dataset)
         embeddings = np.zeros((n_samples, 1024), dtype="f4")
-        start_idx = 0
-
         # Wrap iterator in tqdm for verbose output.
         _iter = self.pipe(dataset, batch_size=self.batch_size)
         if verbose:
             _iter = tqdm(_iter, "hf embed", total=n_samples)
 
         # Embed dataset.
-        for idx, out_dict in enumerate(_iter):
+        for start_idx, out_dict in enumerate(_iter):
             inp = out_dict["input"]
             out = out_dict["output"]
             embeddings[start_idx] = out
-            start_idx += 1
-
         return embeddings
 
     def embed_text(self, text):
@@ -121,6 +113,4 @@ class HuggingfaceEmbedder:
 
         # Embed text.
         text_ds = SingleTextDataset(text)
-        embed = self.embed_text_dataset(text_ds, verbose=False)[0]
-
-        return embed
+        return self.embed_text_dataset(text_ds, verbose=False)[0]

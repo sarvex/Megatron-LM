@@ -84,8 +84,7 @@ class MegatronOptimizer(ABC):
     def get_parameters(self):
         params = []
         for param_group in self.optimizer.param_groups:
-            for param in param_group['params']:
-                params.append(param)
+            params.extend(iter(param_group['params']))
         return params
 
 
@@ -208,24 +207,28 @@ class MegatronOptimizer(ABC):
         pipelined model parallelism (BERT and GPT-2).
         """
 
-        if mpu.is_rank_in_embedding_group(ignore_virtual=True) and \
-                mpu.get_pipeline_model_parallel_world_size() > 1:
-            if mpu.is_pipeline_first_stage(ignore_virtual=True):
-                unwrapped_model = self.models[0]
-            elif mpu.is_pipeline_last_stage(ignore_virtual=True):
-                unwrapped_model = self.models[-1]
-            else:  # We do not support the interleaved schedule for T5 yet.
-                unwrapped_model = self.models[0]
-            unwrapped_model = unwrap_model(
-                unwrapped_model, (torchDDP, LocalDDP, Float16Module))
+        if (
+            not mpu.is_rank_in_embedding_group(ignore_virtual=True)
+            or mpu.get_pipeline_model_parallel_world_size() <= 1
+        ):
+            return
+        if mpu.is_pipeline_first_stage(ignore_virtual=True):
+            unwrapped_model = self.models[0]
+        elif mpu.is_pipeline_last_stage(ignore_virtual=True):
+            unwrapped_model = self.models[-1]
+        else:  # We do not support the interleaved schedule for T5 yet.
+            unwrapped_model = self.models[0]
+        unwrapped_model = unwrap_model(
+            unwrapped_model, (torchDDP, LocalDDP, Float16Module))
 
-            if unwrapped_model.share_word_embeddings:
-                word_embeddings_weight = unwrapped_model.word_embeddings_weight()
-                if args.DDP_impl == 'local':
-                    grad = word_embeddings_weight.main_grad
-                else:
-                    grad = word_embeddings_weight.grad
-                torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
+        if unwrapped_model.share_word_embeddings:
+            word_embeddings_weight = unwrapped_model.word_embeddings_weight()
+            grad = (
+                word_embeddings_weight.main_grad
+                if args.DDP_impl == 'local'
+                else word_embeddings_weight.grad
+            )
+            torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
 
 
     def allreduce_position_embedding_grads(self, args):
@@ -258,22 +261,25 @@ class MegatronOptimizer(ABC):
 
         # All-reduce layernorm parameters across model parallel nodes
         # when sequence parallelism is used
-        if mpu.get_tensor_model_parallel_world_size() > 1 and \
-                args.sequence_parallel:
-            grads = []
-            for model_module in self.models:
-                unwrapped_model = unwrap_model( 
-                    model_module, (torchDDP, LocalDDP, Float16Module))
-                for param in unwrapped_model.parameters():
-                    if getattr(param, 'sequence_parallel', False):
-                        grad = param.main_grad if args.DDP_impl == 'local' else param.grad
-                        grads.append(grad.data)
-            coalesced = _flatten_dense_tensors(grads)
-            torch.distributed.all_reduce(
-                coalesced, group=mpu.get_tensor_model_parallel_group())
-            for buf, synced in zip(grads, _unflatten_dense_tensors(
-                    coalesced, grads)):
-                buf.copy_(synced)
+        if (
+            mpu.get_tensor_model_parallel_world_size() <= 1
+            or not args.sequence_parallel
+        ):
+            return
+        grads = []
+        for model_module in self.models:
+            unwrapped_model = unwrap_model( 
+                model_module, (torchDDP, LocalDDP, Float16Module))
+            for param in unwrapped_model.parameters():
+                if getattr(param, 'sequence_parallel', False):
+                    grad = param.main_grad if args.DDP_impl == 'local' else param.grad
+                    grads.append(grad.data)
+        coalesced = _flatten_dense_tensors(grads)
+        torch.distributed.all_reduce(
+            coalesced, group=mpu.get_tensor_model_parallel_group())
+        for buf, synced in zip(grads, _unflatten_dense_tensors(
+                coalesced, grads)):
+            buf.copy_(synced)
 
 
     def reduce_model_grads(self, args, timers):
@@ -360,20 +366,14 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
         # Dummy tensor needed for apex multi-apply tensor.
         # For bfloat, we don't have multi-tensor apply and for now
         # we set it to none so the multi-tensor apply gets ignored.
-        if bf16:
-            self._dummy_overflow_buf = None
-        else:
-            self._dummy_overflow_buf = torch.cuda.IntTensor([0])
-
+        self._dummy_overflow_buf = None if bf16 else torch.cuda.IntTensor([0])
         # In case grad scaler is not passed, define the unity scale.
         if self.grad_scaler is None:
             self._scale_one = torch.cuda.FloatTensor([1.0])
 
 
     def get_loss_scale(self):
-        if self.grad_scaler is None:
-            return self._scale_one
-        return self.grad_scaler.scale
+        return self._scale_one if self.grad_scaler is None else self.grad_scaler.scale
 
 
     def reload_model_params(self):
@@ -397,10 +397,7 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
                                      op=torch.distributed.ReduceOp.MAX,
                                      group=self.get_model_parallel_group())
 
-        # Check for nan.
-        found_inf_flag = (self.found_inf.item() > 0)
-
-        return found_inf_flag
+        return (self.found_inf.item() > 0)
 
 
     @torch.no_grad()
@@ -539,18 +536,15 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
                         # Reset existing state dict key to the new main param.
                         if param in self.optimizer.state:
                             self.optimizer.state[main_param] \
-                                = self.optimizer.state.pop(param)
-                    # fp32 params.
+                                    = self.optimizer.state.pop(param)
                     elif param.type() == 'torch.cuda.FloatTensor':
                         fp32_params_this_group.append(param)
                         param_group['params'][i] = param
 
                     else:
-                        raise TypeError('Wrapped parameters must be one of '
-                                        'torch.cuda.FloatTensor,  '
-                                        'torch.cuda.HalfTensor, or '
-                                        'torch.cuda.BFloat16Tensor. '
-                                        'Received {}'.format(param.type()))
+                        raise TypeError(
+                            f'Wrapped parameters must be one of torch.cuda.FloatTensor,  torch.cuda.HalfTensor, or torch.cuda.BFloat16Tensor. Received {param.type()}'
+                        )
 
             self.float16_groups.append(float16_params_this_group)
             self.fp32_from_float16_groups.append(
@@ -578,16 +572,18 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
 
         # fp32 params from float16 ones.
         for main_group in self.fp32_from_float16_groups:
-            for main_param in main_group:
-                if main_param.grad is not None:
-                    main_grads.append(main_param.grad.data)
-
+            main_grads.extend(
+                main_param.grad.data
+                for main_param in main_group
+                if main_param.grad is not None
+            )
         # Append fp32 parameters.
         for main_group in self.fp32_from_fp32_groups:
-            for main_param in main_group:
-                if main_param.grad is not None:
-                    main_grads.append(main_param.grad.data)
-        
+            main_grads.extend(
+                main_param.grad.data
+                for main_param in main_group
+                if main_param.grad is not None
+            )
         return main_grads
 
 
@@ -609,16 +605,15 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
             for model_param, main_param in zip(model_group, main_group):
                 if self.params_have_main_grad and hasattr(model_param, 'main_grad'):
                     main_param.grad = model_param.main_grad.float()
-                else:
-                    if model_param.grad is not None:
-                        main_param.grad = model_param.grad.float()
+                elif model_param.grad is not None:
+                    main_param.grad = model_param.grad.float()
 
                 # Safe to deallocate model's grad/main_grad after copying.
                 # (If using contiguous buffers, main_grad's memory should
                 # persist and therefore should not be deallocated.)
                 model_param.grad = None
                 if self.params_have_main_grad and \
-                   not self.use_contiguous_buffers_in_local_ddp:
+                       not self.use_contiguous_buffers_in_local_ddp:
                     model_param.main_grad = None
 
         # For fp32 grads, we need to reset the grads to main grad.
@@ -649,8 +644,7 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
 
 
     def state_dict(self):
-        state_dict = {}
-        state_dict['optimizer'] = self.optimizer.state_dict()
+        state_dict = {'optimizer': self.optimizer.state_dict()}
         if self.grad_scaler:
             state_dict['grad_scaler'] = self.grad_scaler.state_dict()
         state_dict['fp32_from_fp16_params'] = self.fp32_from_float16_groups
@@ -667,11 +661,7 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
         self.optimizer.load_state_dict(state_dict[optimizer_key])
 
         # Grad scaler.
-        if 'grad_scaler' not in state_dict:
-            if self.fp16:
-                print_rank_0('***WARNING*** found an old checkpoint, will not '
-                             'load grad scaler ...')
-        else:
+        if 'grad_scaler' in state_dict:
             if self.grad_scaler:
                 self.grad_scaler.load_state_dict(state_dict['grad_scaler'])
             else:
@@ -679,6 +669,9 @@ class Float16OptimizerWithFloat16Params(MixedPrecisionOptimizer):
                              'checkpoint but it is None in the class. '
                              'Skipping loading grad scaler ...')
 
+        elif self.fp16:
+            print_rank_0('***WARNING*** found an old checkpoint, will not '
+                         'load grad scaler ...')
         # Copy data for the main params.
         fp32_from_float16_params_key = 'fp32_from_fp16_params'
         if fp32_from_float16_params_key not in state_dict:

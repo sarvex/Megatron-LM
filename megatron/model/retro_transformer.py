@@ -64,10 +64,9 @@ class DropPath(MegatronModule):
         # work with diff dim tensors, not just 2D ConvNets
         shape = (hidden_state.shape[0],) + (1,) * (hidden_state.ndim - 1)
         random_tensor = keep_prob + \
-            torch.rand(shape, dtype=hidden_state.dtype, device=hidden_state.device)
+                torch.rand(shape, dtype=hidden_state.dtype, device=hidden_state.device)
         random_tensor.floor_() # binarize
-        output = hidden_state.div(keep_prob) * random_tensor
-        return output
+        return hidden_state.div(keep_prob) * random_tensor
 
 
 class SwitchMLP(MegatronModule):
@@ -79,7 +78,7 @@ class SwitchMLP(MegatronModule):
         args = get_args()
         self.router = torch.nn.Linear(args.hidden_size, args.num_experts)
         self.experts = torch.nn.ModuleList()
-        for i in range(args.num_experts):
+        for _ in range(args.num_experts):
             self.experts.append(ParallelMLP(init_method, output_layer_init_method))
 
     def forward(self, hidden_states):
@@ -1224,7 +1223,7 @@ class ParallelRetroEncoder(MegatronModule):
         self.recompute_method = args.recompute_method
         self.recompute_num_layers = args.recompute_num_layers
         self.distribute_saved_activations = \
-            args.distribute_saved_activations and not args.sequence_parallel
+                args.distribute_saved_activations and not args.sequence_parallel
 
         self.sequence_parallel = args.sequence_parallel
 
@@ -1247,23 +1246,22 @@ class ParallelRetroEncoder(MegatronModule):
                     layer_type=layer_type,
                     self_attn_mask_type=self_attn_mask_type,
                     drop_path_rate=self.drop_path_rates[layer_number - 1])
-            else:
-                layer = ParallelTransformerLayer(
-                    init_method,
-                    output_layer_init_method,
-                    layer_number,
-                    layer_type=layer_type,
-                    self_attn_mask_type=self_attn_mask_type,
-                    drop_path_rate=self.drop_path_rates[layer_number - 1])
-                layer.self_attention.attention_dropout = \
+            layer = ParallelTransformerLayer(
+                init_method,
+                output_layer_init_method,
+                layer_number,
+                layer_type=layer_type,
+                self_attn_mask_type=self_attn_mask_type,
+                drop_path_rate=self.drop_path_rates[layer_number - 1])
+            layer.self_attention.attention_dropout = \
                     torch.nn.Dropout(args.retro_encoder_attention_dropout)
-                layer.hidden_dropout = args.retro_encoder_hidden_dropout
-                return layer
+            layer.hidden_dropout = args.retro_encoder_hidden_dropout
+            return layer
 
         if args.virtual_pipeline_model_parallel_size is not None:
             assert args.num_layers % args.virtual_pipeline_model_parallel_size == 0, \
-                'num_layers_per_stage must be divisible by ' \
-                'virtual_pipeline_model_parallel_size'
+                    'num_layers_per_stage must be divisible by ' \
+                    'virtual_pipeline_model_parallel_size'
             assert args.model_type != ModelType.encoder_and_decoder
 
             # Number of layers in each model chunk is the number of layers in
@@ -1280,11 +1278,11 @@ class ParallelRetroEncoder(MegatronModule):
             #   Stage 1: [2, 3]  [6, 7]
             offset = parallel_state.get_virtual_pipeline_model_parallel_rank() * (
                 args.num_layers // args.virtual_pipeline_model_parallel_size) + \
-                (parallel_state.get_pipeline_model_parallel_rank() * self.num_layers)
+                    (parallel_state.get_pipeline_model_parallel_rank() * self.num_layers)
         else:
             # Each stage gets a contiguous set of layers.
             if args.model_type == ModelType.encoder_and_decoder and \
-                    parallel_state.get_pipeline_model_parallel_world_size() > 1:
+                        parallel_state.get_pipeline_model_parallel_world_size() > 1:
                 pipeline_rank = parallel_state.get_pipeline_model_parallel_rank()
                 if layer_type == LayerType.encoder:
                     offset = pipeline_rank * self.num_layers
@@ -1383,7 +1381,7 @@ class ParallelRetroEncoder(MegatronModule):
         # Checks.
         if inference_params:
             assert self.activations_checkpoint_method is None, \
-                'inference does not work with activation checkpointing'
+                    'inference does not work with activation checkpointing'
 
         if self.pre_process:
             # Data format change to avoid explicit tranposes : [b s h] --> [s b h].
@@ -1451,15 +1449,12 @@ class ParallelRetroEncoder(MegatronModule):
                         enc_dec_attn_mask=enc_dec_attn_mask,
                         inference_params=inference_params)
 
-        # Final layer norm.
-        if self.post_process:
-            # Reverting data format change [s b h] --> [b s h].
-            hidden_states = hidden_states.transpose(0, 1).contiguous()
-            output = self.final_layernorm(hidden_states)
-        else:
-            output = hidden_states
+        if not self.post_process:
+            return hidden_states
 
-        return output
+        # Reverting data format change [s b h] --> [b s h].
+        hidden_states = hidden_states.transpose(0, 1).contiguous()
+        return self.final_layernorm(hidden_states)
 
 
 class ParallelRetroTransformer(MegatronModule):
@@ -1657,7 +1652,7 @@ class ParallelRetroTransformer(MegatronModule):
         # Checks.
         if inference_params:
             assert self.recompute_granularity is None, \
-                'inference does not work with activation checkpointing'
+                    'inference does not work with activation checkpointing'
 
         args = get_args()
 
@@ -1725,7 +1720,4 @@ class ParallelRetroTransformer(MegatronModule):
                     enc_dec_attn_mask=enc_dec_attn_mask,
                     inference_params=inference_params)
 
-        # Final layer norm.
-        output = self.final_layernorm(hidden_states)
-
-        return output
+        return self.final_layernorm(hidden_states)

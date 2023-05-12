@@ -56,9 +56,9 @@ def validate_args(args, defaults={}):
     # Tensor model parallel size.
     args.tensor_model_parallel_size = min(
         args.tensor_model_parallel_size, args.world_size)
-    assert args.world_size % args.tensor_model_parallel_size == 0, 'world size'\
-        ' ({}) is not divisible by tensor model parallel size ({})'.format(
-            args.world_size, args.tensor_model_parallel_size)
+    assert (
+        args.world_size % args.tensor_model_parallel_size == 0
+    ), f'world size ({args.world_size}) is not divisible by tensor model parallel size ({args.tensor_model_parallel_size})'
     # Pipeline model parallel size.
     args.pipeline_model_parallel_size = min(
         args.pipeline_model_parallel_size,
@@ -71,24 +71,23 @@ def validate_args(args, defaults={}):
     # Checks.
     model_parallel_size = args.pipeline_model_parallel_size * \
                           args.tensor_model_parallel_size
-    assert args.world_size % model_parallel_size == 0, 'world size is not'\
-        ' divisible by tensor parallel size ({}) times pipeline parallel ' \
-        'size ({})'.format(args.world_size, args.tensor_model_parallel_size,
-                           args.pipeline_model_parallel_size)
+    assert (
+        args.world_size % model_parallel_size == 0
+    ), f'world size is not divisible by tensor parallel size ({args.world_size}) times pipeline parallel size ({args.tensor_model_parallel_size})'
     args.data_parallel_size = args.world_size // model_parallel_size
     if args.rank == 0:
-        print('using world size: {}, data-parallel-size: {}, '
-              'tensor-model-parallel size: {}, '
-              'pipeline-model-parallel size: {} '.format(
-                  args.world_size, args.data_parallel_size,
-                  args.tensor_model_parallel_size,
-                  args.pipeline_model_parallel_size), flush=True)
-    if args.pipeline_model_parallel_size > 1:
-        if args.pipeline_model_parallel_split_rank is not None:
-            assert args.pipeline_model_parallel_split_rank < \
-                    args.pipeline_model_parallel_size, 'split rank needs'\
-                    ' to be less than pipeline model parallel size ({})'.format(
-                            args.pipeline_model_parallel_size)
+        print(
+            f'using world size: {args.world_size}, data-parallel-size: {args.data_parallel_size}, tensor-model-parallel size: {args.tensor_model_parallel_size}, pipeline-model-parallel size: {args.pipeline_model_parallel_size} ',
+            flush=True,
+        )
+    if (
+        args.pipeline_model_parallel_size > 1
+        and args.pipeline_model_parallel_split_rank is not None
+    ):
+        assert (
+            args.pipeline_model_parallel_split_rank
+            < args.pipeline_model_parallel_size
+        ), f'split rank needs to be less than pipeline model parallel size ({args.pipeline_model_parallel_size})'
 
     # Deprecated arguments
     assert args.batch_size is None, '--batch-size argument is no longer ' \
@@ -119,23 +118,21 @@ def validate_args(args, defaults={}):
         # For default to be valid, it should not be provided in the
         # arguments that are passed to the program. We check this by
         # ensuring the arg is set to None.
-        if getattr(args, key) is not None:
-            if args.rank == 0:
-                print('WARNING: overriding default arguments for {key}:{v} \
-                       with {key}:{v2}'.format(key=key, v=defaults[key],
-                                               v2=getattr(args, key)),
-                                               flush=True)
-        else:
+        if getattr(args, key) is None:
             setattr(args, key, defaults[key])
 
+        elif args.rank == 0:
+            print('WARNING: overriding default arguments for {key}:{v} \
+                       with {key}:{v2}'.format(key=key, v=defaults[key],
+                                           v2=getattr(args, key)),
+                                           flush=True)
     # Batch size.
     assert args.micro_batch_size is not None
     assert args.micro_batch_size > 0
     if args.global_batch_size is None:
         args.global_batch_size = args.micro_batch_size * args.data_parallel_size
         if args.rank == 0:
-            print('setting global batch size to {}'.format(
-                args.global_batch_size), flush=True)
+            print(f'setting global batch size to {args.global_batch_size}', flush=True)
     assert args.global_batch_size > 0
     if args.num_layers_per_virtual_pipeline_stage is not None:
         assert args.pipeline_model_parallel_size > 2, \
@@ -167,8 +164,7 @@ def validate_args(args, defaults={}):
                       'bfloat16 data type.', flush=True)
 
     if args.rank == 0:
-        print('using {} for parameters ...'.format(args.params_dtype),
-              flush=True)
+        print(f'using {args.params_dtype} for parameters ...', flush=True)
 
     # If we do accumulation and all-reduces in fp32, we need to have local DDP
     # and we should make sure use-contiguous-buffers-in-local-ddp is not off.
@@ -189,8 +185,6 @@ def validate_args(args, defaults={}):
     if args.dataloader_type is None:
         args.dataloader_type = 'single'
 
-    # Consumed tokens.
-    args.consumed_train_samples = 0
     args.consumed_valid_samples = 0
 
     # Support for variable sequence lengths across batches/microbatches.
@@ -200,6 +194,7 @@ def validate_args(args, defaults={}):
     # is constant during training.
     args.variable_seq_lengths = False
 
+    args.consumed_train_samples = 0
     # Iteration-based training.
     if args.train_iters:
         # If we use iteration-based training, make sure the
@@ -314,18 +309,18 @@ def validate_args(args, defaults={}):
         assert args.recompute_method is not None, \
             'for distributed recompute activations to work you '\
             'need to use a recompute method '
-        assert TORCH_MAJOR >= 1 and TORCH_MINOR >= 10, \
-            'distributed recompute activations are supported for pytorch ' \
-            'v1.10 and above (Nvidia Pytorch container >= 21.07). Current ' \
-            'pytorch version is v%s.%s.' % (TORCH_MAJOR, TORCH_MINOR)
+        assert (
+            TORCH_MAJOR >= 1 and TORCH_MINOR >= 10
+        ), f'distributed recompute activations are supported for pytorch v1.10 and above (Nvidia Pytorch container >= 21.07). Current pytorch version is v{TORCH_MAJOR}.{TORCH_MINOR}.'
 
     # Tranformer-Engine/FP8 related checking
     if args.fp8_e4m3 or args.fp8_hybrid:
         assert args.transformer_impl == 'transformer_engine', \
             'transformer-engine required for fp8 training and inference'
 
-    assert not (args.fp8_e4m3 and args.fp8_hybrid), \
-        'cannot train with both fp8 e4m3 and hybrid formatting'
+    assert (
+        not args.fp8_e4m3 or not args.fp8_hybrid
+    ), 'cannot train with both fp8 e4m3 and hybrid formatting'
 
     if args.fp16:
         assert args.transformer_impl == 'local', \
@@ -390,7 +385,7 @@ def _print_args(title, args):
         str_list = []
         for arg in vars(args):
             dots = '.' * (48 - len(arg))
-            str_list.append('  {} {} {}'.format(arg, dots, getattr(args, arg)))
+            str_list.append(f'  {arg} {dots} {getattr(args, arg)}')
         for arg in sorted(str_list, key=lambda x: x.lower()):
             print(arg, flush=True)
         print(f'-------------------- end of {title} ---------------------',
@@ -398,7 +393,7 @@ def _print_args(title, args):
 
 
 def _check_arg_is_not_none(args, arg):
-    assert getattr(args, arg) is not None, '{} argument is None'.format(arg)
+    assert getattr(args, arg) is not None, f'{arg} argument is None'
 
 
 def _add_transformer_engine_args(parser):

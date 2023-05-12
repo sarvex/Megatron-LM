@@ -37,11 +37,7 @@ def get_batch(data_iterator):
         keys += 'neighbor_tokens',
 
     # Broadcast data.
-    if data_iterator is not None:
-        data = next(data_iterator)
-    else:
-        data = None
-
+    data = next(data_iterator) if data_iterator is not None else None
     data_b = tensor_parallel.broadcast_data(keys, data, datatype)
 
     # Unpack.

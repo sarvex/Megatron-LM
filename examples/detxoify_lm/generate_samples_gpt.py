@@ -24,10 +24,12 @@ def model_provider(pre_process=True, post_process=True):
     """Build the model."""
 
     print_rank_0('building GPT model ...')
-    model = GPTModel(num_tokentypes=0, parallel_output=False,
-                     pre_process=pre_process, post_process=post_process)
-
-    return model
+    return GPTModel(
+        num_tokentypes=0,
+        parallel_output=False,
+        pre_process=pre_process,
+        post_process=post_process,
+    )
 
 def add_text_generate_args(parser):
     """Text generation arguments."""
@@ -78,8 +80,12 @@ def generate_samples_unconditional(model):
                                                add_BOS=True,
                                                temperature=1.0)
             for prompt, generation, token in zip(sentences, resp_sentences, tokens):
-                datum = {'text': generation[len(prompt):], 'all_text': generation, 'prompt': prompt, 'id': cnt}
-                yield datum
+                yield {
+                    'text': generation[len(prompt) :],
+                    'all_text': generation,
+                    'prompt': prompt,
+                    'id': cnt,
+                }
                 cnt += 1
                 pbar.update()
                 if cnt >= num_samples:
@@ -131,8 +137,12 @@ def generate_samples_conditional(model):
                                                add_BOS=False,
                                                temperature=1.0)
             for prompt, generation, token in zip(sentences, resp_sentences, tokens):
-                datum = {'text': generation[len(prompt):], 'all_text': generation, 'prompt': prompt, 'id': cnt}
-                yield datum
+                yield {
+                    'text': generation[len(prompt) :],
+                    'all_text': generation,
+                    'prompt': prompt,
+                    'id': cnt,
+                }
                 cnt += 1
                 pbar.update()
                 if cnt >= num_samples:
@@ -157,9 +167,10 @@ def generate_and_write_samples_unconditional(model):
 def generate_and_write_samples_conditional(model):
     args = get_args()
     if args.sample_output_file is None:
-        sample_output_file = args.sample_input_file + ".out"
-        print('`sample-output-file` not specified, setting '
-              'it to {}'.format(sample_output_file))
+        sample_output_file = f"{args.sample_input_file}.out"
+        print(
+            f'`sample-output-file` not specified, setting it to {sample_output_file}'
+        )
     else:
         sample_output_file = args.sample_output_file
     with open(sample_output_file, 'w') as f:

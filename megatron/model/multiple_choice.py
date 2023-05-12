@@ -90,13 +90,14 @@ class MultipleChoice(MegatronModule):
         """For easy load when model is combined with other heads,
         add an extra key."""
 
-        state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(prefix=prefix,
-                                                                 keep_vars=keep_vars)
+        state_dict_ = {
+            self._language_model_key: self.language_model.state_dict_for_save_checkpoint(
+                prefix=prefix, keep_vars=keep_vars
+            )
+        }
         if self.post_process:
             state_dict_[self._multichoice_head_key] \
-                = self.multichoice_head.state_dict(prefix=prefix, keep_vars=keep_vars)
+                    = self.multichoice_head.state_dict(prefix=prefix, keep_vars=keep_vars)
         return state_dict_
 
     def load_state_dict(self, state_dict, strict=True):
@@ -109,6 +110,6 @@ class MultipleChoice(MegatronModule):
                 self.multichoice_head.load_state_dict(
                     state_dict[self._multichoice_head_key], strict=strict)
             else:
-                print_rank_last('***WARNING*** could not find {} in the checkpoint, '
-                                'initializing to random'.format(
-                                    self._multichoice_head_key))
+                print_rank_last(
+                    f'***WARNING*** could not find {self._multichoice_head_key} in the checkpoint, initializing to random'
+                )

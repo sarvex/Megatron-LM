@@ -42,11 +42,11 @@ class OptimizerParamScheduler(object):
         self.use_checkpoint_opt_param_scheduler = use_checkpoint_opt_param_scheduler
         if self.override_opt_param_scheduler:
             assert not self.use_checkpoint_opt_param_scheduler, 'both override and '\
-                'use-checkpoint are set.'
+                    'use-checkpoint are set.'
 
         # Set the learning rate
         self.step(0)
-        print_rank_0('> learning rate decay style: {}'.format(self.lr_decay_style))
+        print_rank_0(f'> learning rate decay style: {self.lr_decay_style}')
 
 
     def get_wd(self):
@@ -68,8 +68,9 @@ class OptimizerParamScheduler(object):
         elif self.wd_incr_style == 'cosine':
             coeff = 0.5 * (math.cos(math.pi * (1 - incr_ratio)) + 1.0)
         else:
-            raise Exception('{} weight decay increment style is not supported.'.format(
-                self.wd_incr_style))
+            raise Exception(
+                f'{self.wd_incr_style} weight decay increment style is not supported.'
+            )
 
         return self.start_wd + coeff * delta_wd
 
@@ -81,7 +82,7 @@ class OptimizerParamScheduler(object):
         # Use linear warmup for the initial part.
         if self.lr_warmup_steps > 0 and self.num_steps <= self.lr_warmup_steps:
             return self.max_lr * float(self.num_steps) / \
-                float(self.lr_warmup_steps)
+                    float(self.lr_warmup_steps)
 
         # If the learning rate is constant, just return the initial value.
         if self.lr_decay_style == 'constant':
@@ -110,8 +111,7 @@ class OptimizerParamScheduler(object):
         elif self.lr_decay_style == 'cosine':
             coeff = 0.5 * (math.cos(math.pi * decay_ratio) + 1.0)
         else:
-            raise Exception('{} decay style is not supported.'.format(
-                self.lr_decay_style))
+            raise Exception(f'{self.lr_decay_style} decay style is not supported.')
 
         return self.min_lr + coeff * delta_lr
 
@@ -127,7 +127,7 @@ class OptimizerParamScheduler(object):
 
 
     def state_dict(self):
-        state_dict = {
+        return {
             'max_lr': self.max_lr,
             'lr_warmup_steps': self.lr_warmup_steps,
             'num_steps': self.num_steps,
@@ -137,36 +137,31 @@ class OptimizerParamScheduler(object):
             'start_wd': self.start_wd,
             'end_wd': self.end_wd,
             'wd_incr_style': self.wd_incr_style,
-            'wd_incr_steps': self.wd_incr_steps
+            'wd_incr_steps': self.wd_incr_steps,
         }
-        return state_dict
 
 
     def _check_and_set(self, cls_value, sd_value, name):
         """Auxiliary function for checking the values in the checkpoint and
         setting them."""
         if self.override_opt_param_scheduler:
-            print_rank_0(' > overriding {} value to {}'.format(name, cls_value))
+            print_rank_0(f' > overriding {name} value to {cls_value}')
             return cls_value
 
         if not self.use_checkpoint_opt_param_scheduler:
             assert cls_value == sd_value, \
-                f'OptimizerParamScheduler: class input value {cls_value} and checkpoint' \
-                f'value {sd_value} for {name} do not match'
-        print_rank_0(' > using checkpoint value {} for {}'.format(sd_value,
-                                                                  name))
+                    f'OptimizerParamScheduler: class input value {cls_value} and checkpoint' \
+                    f'value {sd_value} for {name} do not match'
+        print_rank_0(f' > using checkpoint value {sd_value} for {name}')
         return sd_value
 
 
     def load_state_dict(self, sd):
 
-        if 'start_lr' in sd:
-            max_lr_ = sd['start_lr']
-        else:
-            max_lr_ = sd['max_lr']
+        max_lr_ = sd['start_lr'] if 'start_lr' in sd else sd['max_lr']
         self.max_lr = self._check_and_set(self.max_lr, max_lr_,
                                           'learning rate')
-        
+
         self.min_lr = self._check_and_set(self.min_lr, sd['min_lr'],
                                           'minimum learning rate')
 
@@ -197,10 +192,7 @@ class OptimizerParamScheduler(object):
                                                lr_decay_style_,
                                                'learning rate decay style')
 
-        if 'num_iters' in sd:
-            num_steps = sd['num_iters']
-        else:
-            num_steps = sd['num_steps']
+        num_steps = sd['num_iters'] if 'num_iters' in sd else sd['num_steps']
         self.step(increment=num_steps)
 
 

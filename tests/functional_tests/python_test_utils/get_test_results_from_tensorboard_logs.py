@@ -42,7 +42,7 @@ def collect_train_test_metrics(logs_dir, run_name):
     iteration_time = read_tb_logs_as_list(logs_dir, "iteration-time")
 
     # First few iterations might take a little longer. So we take the last 70 percent of the timings
-    idx = len(iteration_time)//3   
+    idx = len(iteration_time)//3
     iteration_time_avg = sum(iteration_time[idx:])/len(iteration_time[idx:])
 
     train_metrics = {
@@ -50,13 +50,13 @@ def collect_train_test_metrics(logs_dir, run_name):
             "start_step": 0,
             "end_step": len(train_loss_list),
             "step_interval": 5,
-            "values": train_loss_list[0:len(train_loss_list):5],
+            "values": train_loss_list[::5],
         },
         "num-zeros": {
             "start_step": 0,
             "end_step": len(num_zeros),
             "step_interval": 5,
-            "values": num_zeros[0:len(num_zeros):5],
+            "values": num_zeros[::5],
         },
         "iteration_timing_avg": iteration_time_avg,
     }

@@ -137,18 +137,17 @@ class Timers:
         # is provided, it matches the one that the timer was created with.
         if name in self._timers:
             if log_level is not None:
-                assert log_level == self._log_levels[name], \
-                    'input log level {} does not match already existing '\
-                    'log level {} for {} timer'.format(
-                        log_level, self._log_levels[name], name)
+                assert (
+                    log_level == self._log_levels[name]
+                ), f'input log level {log_level} does not match already existing log level {self._log_levels[name]} for {name} timer'
             return self._timers[name]
         # If timer does not exist and no log level is provided,
         # set it to the max log level which is 2.
         if log_level is None:
             log_level = self._max_log_level
-        assert log_level <= self._max_log_level, \
-            'log level {} is larger than max supported log level {}'.format(
-                log_level, self._max_log_level)
+        assert (
+            log_level <= self._max_log_level
+        ), f'log level {log_level} is larger than max supported log level {self._max_log_level}'
         # Now if the input log level is larger than the one set for
         # the timers class, just ignore it and return a dummy timer.
         if log_level > self._log_level:
@@ -231,11 +230,11 @@ class Timers:
         for name in name_to_min_max_time:
             min_time, max_time = name_to_min_max_time[name]
             if max_only:
-                output_string += '\n    {}: {:.2f}'.format(
-                    (name+' ').ljust(48, '.'), max_time)
+                output_string += '\n    {}: {:.2f}'.format(f'{name} '.ljust(48, '.'), max_time)
             else:
                 output_string += '\n    {}: ({:.2f}, {:.2f})'.format(
-                    (name+' ').ljust(48, '.'), min_time, max_time)
+                    f'{name} '.ljust(48, '.'), min_time, max_time
+                )
         return output_string
 
 
@@ -253,12 +252,10 @@ class Timers:
                     no_reported_timing = False
                     if not_yet_found:
                         not_yet_found = False
-                        output_string += '\n  {}:'.format(name)
+                        output_string += f'\n  {name}:'
                     output_string += '\n     rank {:2d}: {:.2f}'.format(
                         rank, rank_name_to_time[rank, i] / normalizer)
-        if no_reported_timing:
-            return None
-        return output_string
+        return None if no_reported_timing else output_string
 
 
     def log(self, names, rank=None, normalizer=1.0, reset=True, barrier=False):
@@ -277,8 +274,7 @@ class Timers:
                                                             reset, barrier,
                                                             normalizer/1000.0)
         else:
-            raise Exception('unknown timing log option {}'.format(
-                self._log_option))
+            raise Exception(f'unknown timing log option {self._log_option}')
 
         # If no input rank is provided, log on last rank.
         if rank is None:
@@ -301,4 +297,4 @@ class Timers:
         if writer is not None:
             for name in name_to_min_max_time:
                 _, max_time = name_to_min_max_time[name]
-                writer.add_scalar(name + '-time', max_time, iteration)
+                writer.add_scalar(f'{name}-time', max_time, iteration)

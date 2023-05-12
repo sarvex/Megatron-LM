@@ -59,6 +59,5 @@ class BeamHypotheses(object):
             return True
         else:
             cur_score = best_sum_logprobs / cur_len ** self.length_penalty
-            ret = self.worst_score >= cur_score
-            return ret
+            return self.worst_score >= cur_score
 

@@ -6,7 +6,7 @@ import requests
 
 if __name__ == "__main__":
     url = sys.argv[1]
-    url = 'http://' + url + '/api'
+    url = f'http://{url}/api'
     headers = {'Content-Type': 'application/json'}
 
     while True:

@@ -70,8 +70,8 @@ class MitClassificationModel(MegatronModule):
     def _init_weights(self, m):
         if isinstance(m, torch.nn.Linear):
             trunc_normal_(m.weight, std=.02)
-            if isinstance(m, torch.nn.Linear) and m.bias is not None:
-                torch.nn.init.constant_(m.bias, 0)
+        if isinstance(m, torch.nn.Linear) and m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
 
     def set_input_tensor(self, input_tensor):
         """See megatron.model.transformer.set_input_tensor()"""

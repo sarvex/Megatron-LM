@@ -180,12 +180,12 @@ def _set_timers(args):
 
 def _ensure_var_is_initialized(var, name):
     """Make sure the input variable is not None."""
-    assert var is not None, '{} is not initialized.'.format(name)
+    assert var is not None, f'{name} is not initialized.'
 
 
 def _ensure_var_is_not_initialized(var, name):
     """Make sure the input variable is not None."""
-    assert var is None, '{} is already initialized.'.format(name)
+    assert var is None, f'{name} is already initialized.'
 
 
 

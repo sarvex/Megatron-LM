@@ -170,7 +170,7 @@ class Cityscapes(VisionDataset):
             img_dir = os.path.join(self.images_dir, city)
             target_dir = os.path.join(self.targets_dir, city)
             for file_name in os.listdir(img_dir):
-                target_name = '{}_{}_labelIds.png'.format(file_name.split('_leftImg8bit')[0], self.mode)
+                target_name = f"{file_name.split('_leftImg8bit')[0]}_{self.mode}_labelIds.png"
                 self.images.append(os.path.join(img_dir, file_name))
                 self.targets.append(os.path.join(target_dir, target_name))
 

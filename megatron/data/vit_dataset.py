@@ -41,10 +41,7 @@ class Solarization(object):
         self.p = p
 
     def __call__(self, img):
-        if random.random() < self.p:
-            return ImageOps.solarize(img)
-        else:
-            return img
+        return ImageOps.solarize(img) if random.random() < self.p else img
 
 
 class ClassificationTransform():
@@ -72,8 +69,7 @@ class ClassificationTransform():
             ])
 
     def __call__(self, input):
-        output = self.transform(input)
-        return output
+        return self.transform(input)
 
 
 class InpaintingTransform():
@@ -118,7 +114,7 @@ class InpaintingTransform():
         if mask_type == 'random':
             x = torch.randint(0, img_size_patch, ())
             y = torch.randint(0, img_size_patch, ())
-            for i in range(mask_size):
+            for _ in range(mask_size):
                 r = torch.randint(0, len(action_list), ())
                 x = torch.clamp(x + action_list[r][0], min=0, max=img_size_patch - 1)
                 y = torch.clamp(y + action_list[r][1], min=0, max=img_size_patch - 1)
@@ -204,11 +200,11 @@ class DinoTransform(object):
         ])
 
     def __call__(self, image):
-        crops = []
-        crops.append(self.global_transform1(image))
+        crops = [self.global_transform1(image)]
         crops.append(self.global_transform2(image))
-        for _ in range(self.local_crops_number):
-            crops.append(self.local_transform(image))
+        crops.extend(
+            self.local_transform(image) for _ in range(self.local_crops_number)
+        )
         return crops
 
 
@@ -225,8 +221,9 @@ def build_train_valid_datasets(data_path, image_size=224):
         train_transform = DinoTransform(image_size, train=True)
         val_transform = ClassificationTransform(image_size, train=False)
     else:
-        raise Exception('{} vit pretraining type is not supported.'.format(
-                args.vit_pretraining_type))
+        raise Exception(
+            f'{args.vit_pretraining_type} vit pretraining type is not supported.'
+        )
 
     # training dataset
     train_data_path = data_path[0] if len(data_path) <= 2 else data_path[2]

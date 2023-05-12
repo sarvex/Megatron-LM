@@ -60,22 +60,20 @@ class DropPath(MegatronModule):
         # hidden_state: [s, b, h]
         shape = (1,) + (hidden_state.shape[1],) + (1,) * (hidden_state.ndim - 2)
         random_tensor = keep_prob + \
-            torch.rand(shape, dtype=hidden_state.dtype, device=hidden_state.device)
+                torch.rand(shape, dtype=hidden_state.dtype, device=hidden_state.device)
         random_tensor.floor_()  # binarize
-        output = hidden_state.div(keep_prob) * random_tensor
-        return output
+        return hidden_state.div(keep_prob) * random_tensor
 
 def _args_to_kwargs():
     args = get_args()
 
-    common_kwargs = {
+    return {
         "params_dtype": args.params_dtype,
         "use_cpu_initialization": args.use_cpu_initialization,
         "perform_initialization": args.perform_initialization,
         "gradient_accumulation_fusion": args.gradient_accumulation_fusion,
         "sequence_parallel_enabled": args.sequence_parallel,
     }
-    return common_kwargs
 
 class ParallelMLP(MegatronModule):
     """MLP.
@@ -160,7 +158,7 @@ class SwitchMLP(MegatronModule):
         args = get_args()
         self.router = torch.nn.Linear(args.hidden_size, args.num_experts)
         self.experts = torch.nn.ModuleList()
-        for i in range(args.num_experts):
+        for _ in range(args.num_experts):
             self.experts.append(ParallelMLP(init_method, output_layer_init_method))
 
     def forward(self, hidden_states):
@@ -541,7 +539,7 @@ class ParallelAttention(MegatronModule):
                 is_first_step = True
             else:
                 inference_key_memory, inference_value_memory = \
-                    inference_params.key_value_memory_dict[self.layer_number]
+                        inference_params.key_value_memory_dict[self.layer_number]
 
         # =====================
         # Query, Key, and Value
@@ -553,7 +551,7 @@ class ParallelAttention(MegatronModule):
 
             # [sq, b, (np * 3 * hn)] --> [sq, b, np, 3 * hn]
             new_tensor_shape = mixed_x_layer.size()[:-1] + \
-                (self.num_attention_heads_per_partition,
+                    (self.num_attention_heads_per_partition,
                  3 * self.hidden_size_per_attention_head)
             mixed_x_layer = mixed_x_layer.view(*new_tensor_shape)
 
@@ -567,7 +565,7 @@ class ParallelAttention(MegatronModule):
 
             # [sk, b, (np * 2 * hn)] --> [sk, b, np, 2 * hn]
             new_tensor_shape = mixed_kv_layer.size()[:-1] + \
-                (self.num_attention_heads_per_partition,
+                    (self.num_attention_heads_per_partition,
                  2 * self.hidden_size_per_attention_head)
             mixed_kv_layer = mixed_kv_layer.view(*new_tensor_shape)
 
@@ -579,7 +577,7 @@ class ParallelAttention(MegatronModule):
             query_layer, _ = self.query(hidden_states)
             # [sq, b, hp] --> [sq, b, np, hn]
             new_tensor_shape = query_layer.size()[:-1] + \
-                (self.num_attention_heads_per_partition,
+                    (self.num_attention_heads_per_partition,
                  self.hidden_size_per_attention_head)
             query_layer = query_layer.view(*new_tensor_shape)
 
@@ -647,14 +645,7 @@ class ParallelAttention(MegatronModule):
             # otherwise, only relative positional embedding takes effect
             # value_layer = apply_rotary_pos_emb(value_layer, k_pos_emb)
 
-        if not self.use_flash_attn:
-            if self.checkpoint_core_attention:
-                context_layer = self._checkpointed_attention_forward(
-                    query_layer, key_layer, value_layer, attention_mask)
-            else:
-                context_layer = self.core_attention(
-                    query_layer, key_layer, value_layer, attention_mask)
-        else:
+        if self.use_flash_attn:
             q, k, v = [rearrange(x, 's b ... -> b s ...').contiguous()
                        for x in (query_layer, key_layer, value_layer)]
             if not self.sequence_parallel:
@@ -664,6 +655,12 @@ class ParallelAttention(MegatronModule):
                 context_layer = self.core_attention_flash(q, k, v)
             context_layer = rearrange(context_layer, 'b s h d -> s b (h d)').contiguous()
 
+        elif self.checkpoint_core_attention:
+            context_layer = self._checkpointed_attention_forward(
+                query_layer, key_layer, value_layer, attention_mask)
+        else:
+            context_layer = self.core_attention(
+                query_layer, key_layer, value_layer, attention_mask)
         # =================
         # Output. [sq, b, h]
         # =================
@@ -967,10 +964,7 @@ def _get_num_layers(args, is_encoder_and_decoder_model, is_decoder=False):
                 args.num_layers // args.transformer_pipeline_model_parallel_size
             )
     else:
-        if not is_decoder:
-            num_layers = args.encoder_num_layers
-        else:
-            num_layers = args.decoder_num_layers
+        num_layers = args.decoder_num_layers if is_decoder else args.encoder_num_layers
     return num_layers
 
 

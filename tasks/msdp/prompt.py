@@ -31,9 +31,7 @@ def call_model_api(inputs, tokens_to_generate):
 
     input_len = len(inputs)
     outputs = outputs[input_len:]
-    outputs = outputs.split("\n")[0].strip()
-    
-    return outputs
+    return outputs.split("\n")[0].strip()
 
 
 def read_prompts(prompt_path, prompt_type, n_example):
@@ -44,11 +42,11 @@ def read_prompts(prompt_path, prompt_type, n_example):
         prompt_examples_dict = {}
         # read prompt_path
         with open(prompt_path, "r") as f:
-            for i, line in enumerate(f):
+            for line in f:
                 line = line.strip()
                 line_dict = json.loads(line)
                 key = list(line_dict.keys())[0]
-                
+
                 if key not in prompt_examples_dict:
                     prompt_examples = line_dict[key]
                     prompt = ""
@@ -83,60 +81,58 @@ def generate_samples_by_calling_api():
         # read knowledge generation prompts
         knwl_gen_prompt_dict = read_prompts(
             args.prompt_file, args.prompt_type, args.num_prompt_examples)
-        
+
     else:
         resp_gen_prompt = read_prompts(
             args.prompt_file, args.prompt_type, args.num_prompt_examples)
 
-    # read the test data
-    fname = open(args.sample_input_file, "r")
-    test_sample_list = fname.readlines()
-    # create output file
-    fname_out = open(args.sample_output_file, "w")
+    with open(args.sample_input_file, "r") as fname:
+        test_sample_list = fname.readlines()
+        # create output file
+        fname_out = open(args.sample_output_file, "w")
 
-    # call the api to get the output generations
-    for test_sample in test_sample_list:
-        test_sample = test_sample.strip()
-        splits = test_sample.split("\t")
-        topic = splits[0]
+            # call the api to get the output generations
+        for test_sample in test_sample_list:
+            test_sample = test_sample.strip()
+            splits = test_sample.split("\t")
+            topic = splits[0]
 
-        # prepare the inputs for the api
-        if args.prompt_type == "knowledge":
-            ## inputs = prompt + current test
-            # get the prompt
-            turns = splits[1].split(" [SEP] ")
-            last_turn = turns[-1]
-            key = topic + " " + last_turn
-            inputs = knwl_gen_prompt_dict[key]
+                    # prepare the inputs for the api
+            if args.prompt_type == "knowledge":
+                ## inputs = prompt + current test
+                # get the prompt
+                turns = splits[1].split(" [SEP] ")
+                last_turn = turns[-1]
+                key = f"{topic} {last_turn}"
+                inputs = knwl_gen_prompt_dict[key]
 
-            # add current test
-            inputs += "( " + last_turn + " ) " + topic + " =>"
+                            # add current test
+                inputs += f"( {last_turn} ) {topic} =>"
 
-        else:
-            # inputs = prompt + current test
-            # get the prompt
-            inputs = resp_gen_prompt
+            else:
+                # inputs = prompt + current test
+                # get the prompt
+                inputs = resp_gen_prompt
 
-            # add current test
-            turns = splits[1].split(" [SEP] ")
-            knowledge = splits[2]
-            last_turn = turns[-1]
-            last_turn = " ".join(word_tokenize(last_turn))
-            knowledge = " ".join(word_tokenize(knowledge))
-            knowledge = knowledge.strip()
-            last_turn = last_turn.strip()
-            inputs += "Topic: " + topic + ". "
-            inputs += "User says: " + last_turn + " "
-            inputs += "We know that: " + knowledge + " "
-            inputs += "System replies:"
+                # add current test
+                turns = splits[1].split(" [SEP] ")
+                knowledge = splits[2]
+                last_turn = turns[-1]
+                last_turn = " ".join(word_tokenize(last_turn))
+                knowledge = " ".join(word_tokenize(knowledge))
+                knowledge = knowledge.strip()
+                last_turn = last_turn.strip()
+                inputs += f"Topic: {topic}. "
+                inputs += f"User says: {last_turn} "
+                inputs += f"We know that: {knowledge} "
+                inputs += "System replies:"
 
-        # get the output generations from the api, 
-        # and write to the output file
-        generations = call_model_api(inputs, args.out_seq_length)
-        fname_out.write(generations)
-        fname_out.write("\n")
+            # get the output generations from the api, 
+            # and write to the output file
+            generations = call_model_api(inputs, args.out_seq_length)
+            fname_out.write(generations)
+            fname_out.write("\n")
 
-    fname.close()
     fname_out.close()
 
 
@@ -144,13 +140,12 @@ def model_provider(pre_process=True, post_process=True):
     """Build the model."""
 
     print_rank_0('building GPT model ...')
-    model = GPTModel(
+    return GPTModel(
         num_tokentypes=0,
         parallel_output=True,
         pre_process=pre_process,
-        post_process=post_process
+        post_process=post_process,
     )
-    return model
 
 
 def generate_samples_by_prompting_input_from_file(model):
@@ -168,9 +163,10 @@ def generate_samples_by_prompting_input_from_file(model):
         all_raw_text = fname.readlines()
         input_count = len(all_raw_text)
         if args.sample_output_file is None:
-            sample_output_file = args.sample_input_file + ".out"
-            print('`sample-output-file` not specified, setting '
-                    'it to {}'.format(sample_output_file))
+            sample_output_file = f"{args.sample_input_file}.out"
+            print(
+                f'`sample-output-file` not specified, setting it to {sample_output_file}'
+            )
         else:
             sample_output_file = args.sample_output_file
 
@@ -185,7 +181,7 @@ def generate_samples_by_prompting_input_from_file(model):
         # read the prompts for the knowledge generation
         prompt_examples_dict = {}
         with open(args.prompt_file, "r") as f:
-            for i, line in enumerate(f):
+            for line in f:
                 line = line.strip()
                 line_dict = json.loads(line)
                 key = list(line_dict.keys())[0]
@@ -228,13 +224,13 @@ def generate_samples_by_prompting_input_from_file(model):
                     # first add the prompt into the raw_text
                     turns = splits[1].split(" [SEP] ")
                     last_turn = turns[-1]
-                    key = topic + " " + last_turn
+                    key = f"{topic} {last_turn}"
                     raw_text = prompt_examples_dict[key]
 
                     # construct inputs for knowledge generation
                     # then add the constructed inputs into the raw_text
-                    raw_text += "( " + last_turn + " ) " + topic + " =>"
-                
+                    raw_text += f"( {last_turn} ) {topic} =>"
+
                 else:
                     # first add the prompt into the raw_text
                     raw_text = prompt
@@ -248,14 +244,14 @@ def generate_samples_by_prompting_input_from_file(model):
                     knowledge = " ".join(word_tokenize(knowledge))
                     knowledge = knowledge.strip()
                     last_turn = last_turn.strip()
-                    raw_text += "Topic: " + topic + ". "
-                    raw_text += "User says: " + last_turn + " "
-                    raw_text += "We know that: " + knowledge + " "
+                    raw_text += f"Topic: {topic}. "
+                    raw_text += f"User says: {last_turn} "
+                    raw_text += f"We know that: {knowledge} "
                     raw_text += "System replies:"
 
                 input_pos += 1
                 raw_text_len = len(raw_text)
-            
+
             else:
                 raw_text = "EMPTY TEXT"
 
@@ -271,14 +267,15 @@ def generate_samples_by_prompting_input_from_file(model):
             prompts_plus_generations = prompts_plus_generations[0]
 
             # write the generated output to the output file
-            if mpu.get_tensor_model_parallel_rank() == 0:
-                if mpu.is_pipeline_first_stage():
-
-                    generations = prompts_plus_generations[raw_text_len:]
-                    generations = generations.split("\n")[0]
-                    generations = generations.strip()
-                    fname_out.write(generations)
-                    fname_out.write("\n")
+            if (
+                mpu.get_tensor_model_parallel_rank() == 0
+                and mpu.is_pipeline_first_stage()
+            ):
+                generations = prompts_plus_generations[raw_text_len:]
+                generations = generations.split("\n")[0]
+                generations = generations.strip()
+                fname_out.write(generations)
+                fname_out.write("\n")
 
             raw_text = None
             if input_pos == input_count:

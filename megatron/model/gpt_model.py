@@ -28,18 +28,17 @@ def post_language_model_processing(lm_output, labels, logit_weights,
     if labels is None:
         # [s b h] => [b s h]
         return output.transpose(0,1).contiguous()
+    # [b s] => [s b]
+    labels = labels.transpose(0,1).contiguous()
+    if fp16_lm_cross_entropy:
+        assert output.dtype == torch.half
+        loss = tensor_parallel.vocab_parallel_cross_entropy(output, labels)
     else:
-        # [b s] => [s b]
-        labels = labels.transpose(0,1).contiguous()
-        if fp16_lm_cross_entropy:
-            assert output.dtype == torch.half
-            loss = tensor_parallel.vocab_parallel_cross_entropy(output, labels)
-        else:
-            loss = tensor_parallel.vocab_parallel_cross_entropy(output.float(), labels)
-        
-        # [s b] => [b, s]
-        loss = loss.transpose(0,1).contiguous()
-        return loss
+        loss = tensor_parallel.vocab_parallel_cross_entropy(output.float(), labels)
+
+    # [s b] => [b, s]
+    loss = loss.transpose(0,1).contiguous()
+    return loss
 
 
 class GPTModel(MegatronModule):
@@ -100,14 +99,15 @@ class GPTModel(MegatronModule):
 
     def state_dict_for_save_checkpoint(self, prefix='', keep_vars=False):
 
-        state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(
-                prefix=prefix, keep_vars=keep_vars)
+        state_dict_ = {
+            self._language_model_key: self.language_model.state_dict_for_save_checkpoint(
+                prefix=prefix, keep_vars=keep_vars
+            )
+        }
         # Save word_embeddings.
         if self.post_process and not self.pre_process and not self.untie_embeddings_and_output_weights:
             state_dict_[self._word_embeddings_for_head_key] \
-                = self.word_embeddings.state_dict(prefix=prefix,
+                    = self.word_embeddings.state_dict(prefix=prefix,
                                                   keep_vars=keep_vars)
         return state_dict_
 

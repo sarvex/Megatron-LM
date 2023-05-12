@@ -125,9 +125,7 @@ def _initialize_affine_weight_cpu(weight, output_size, input_size,
 
     with torch.no_grad():
         torch.cat(my_weight_list, dim=partition_dim, out=weight)
-    if return_master_weight:
-        return master_weight
-    return None
+    return master_weight if return_master_weight else None
 
 
 class VocabParallelEmbedding(torch.nn.Module):
@@ -193,7 +191,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         if self.tensor_model_parallel_size > 1:
             # Build the mask.
             input_mask = (input_ < self.vocab_start_index) | \
-                         (input_ >= self.vocab_end_index)
+                             (input_ >= self.vocab_end_index)
             # Mask the input.
             masked_input = input_.clone() - self.vocab_start_index
             masked_input[input_mask] = 0
@@ -207,9 +205,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         # Mask the output embedding.
         if self.tensor_model_parallel_size > 1:
             output_parallel[input_mask, :] = 0.0
-        # Reduce across all the model parallel GPUs.
-        output = reduce_from_tensor_model_parallel_region(output_parallel)
-        return output
+        return reduce_from_tensor_model_parallel_region(output_parallel)
 
 
 class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
@@ -395,21 +391,23 @@ def linear_with_grad_accumulation_and_async_allreduce(
         sequence_parallel_enabled,
     ]
 
-    if not linear_with_grad_accumulation_and_async_allreduce.warned:
-        if os.environ.get('CUDA_DEVICE_MAX_CONNECTIONS') != "1":
-            if sequence_parallel_enabled:
-                warnings.warn(
-                    "When using sequence parallelism it is recommended to set the "
-                    "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
-                    "maximum speedup")
-                linear_with_grad_accumulation_and_async_allreduce.warned = True
+    if (
+        not linear_with_grad_accumulation_and_async_allreduce.warned
+        and os.environ.get('CUDA_DEVICE_MAX_CONNECTIONS') != "1"
+    ):
+        if sequence_parallel_enabled:
+            warnings.warn(
+                "When using sequence parallelism it is recommended to set the "
+                "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
+                "maximum speedup")
+            linear_with_grad_accumulation_and_async_allreduce.warned = True
 
-            if async_grad_allreduce:
-                warnings.warn(
-                    "When using async grad allreduce it is recommended to set the "
-                    "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
-                    "maximum speedup")
-                linear_with_grad_accumulation_and_async_allreduce.warned = True
+        if async_grad_allreduce:
+            warnings.warn(
+                "When using async grad allreduce it is recommended to set the "
+                "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
+                "maximum speedup")
+            linear_with_grad_accumulation_and_async_allreduce.warned = True
 
     return LinearWithGradAccumulationAndAsyncCommunication.apply(*args)
 
@@ -509,26 +507,24 @@ class ColumnParallelLinear(torch.nn.Module):
         self.async_tensor_model_parallel_allreduce = (
                 async_tensor_model_parallel_allreduce and
                 world_size > 1)
-        if sequence_parallel_enabled:
-            if world_size <= 1:
-                warnings.warn(
-                    f"`sequence_parallel_enabled` is set to `True`, but tensor model parallel size is {world_size}. "
-                    f"Disabling sequence parallel."
-                )
-                sequence_parallel_enabled = False
+        if sequence_parallel_enabled and world_size <= 1:
+            warnings.warn(
+                f"`sequence_parallel_enabled` is set to `True`, but tensor model parallel size is {world_size}. "
+                f"Disabling sequence parallel."
+            )
+            sequence_parallel_enabled = False
         self.sequence_parallel_enabled = sequence_parallel_enabled
 
-        if gradient_accumulation_fusion:
-            if not _grad_accum_fusion_available:
-                raise RuntimeError(
-                    "ColumnParallelLinear was called with gradient_accumulation_fusion set "
-                    "to True but the custom CUDA extension fused_weight_gradient_mlp_cuda "
-                    "module is not found. To use gradient_accumulation_fusion you must "
-                    "install APEX with --cpp_ext and --cuda_ext. For example: "
-                    "pip install --global-option=\"--cpp_ext\" --global-option=\"--cuda_ext .\" "
-                    "Note that the extension requires CUDA>=11. Otherwise, you must turn off "
-                    "gradient accumulation fusion."
-                )
+        if gradient_accumulation_fusion and not _grad_accum_fusion_available:
+            raise RuntimeError(
+                "ColumnParallelLinear was called with gradient_accumulation_fusion set "
+                "to True but the custom CUDA extension fused_weight_gradient_mlp_cuda "
+                "module is not found. To use gradient_accumulation_fusion you must "
+                "install APEX with --cpp_ext and --cuda_ext. For example: "
+                "pip install --global-option=\"--cpp_ext\" --global-option=\"--cuda_ext .\" "
+                "Note that the extension requires CUDA>=11. Otherwise, you must turn off "
+                "gradient accumulation fusion."
+            )
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
         if self.async_tensor_model_parallel_allreduce and self.sequence_parallel_enabled:

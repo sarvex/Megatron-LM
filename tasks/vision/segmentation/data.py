@@ -52,8 +52,7 @@ class VitSegmentationImageTransform():
             ])
 
     def __call__(self, input):
-        output = self.transform(input)
-        return output
+        return self.transform(input)
 
 
 class VitSegmentationTargetTransform():
@@ -61,8 +60,7 @@ class VitSegmentationTargetTransform():
         self.train = train
 
     def __call__(self, input):
-        output = torch.from_numpy(np.array(input, dtype=np.int32)).long()
-        return output
+        return torch.from_numpy(np.array(input, dtype=np.int32)).long()
 
 
 class RandomSeedSegmentationDataset(Dataset):

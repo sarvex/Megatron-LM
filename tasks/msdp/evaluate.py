@@ -12,18 +12,18 @@ def evaluate_f1(guess_file, answer_file):
     """Evaluating F1 Score"""
 
     guess_list = []
-    print_rank_0('reading %s' % guess_file)
+    print_rank_0(f'reading {guess_file}')
     with open(guess_file, "r") as f:
-        for i, line in enumerate(tqdm(f)):
+        for line in tqdm(f):
             line = line.strip()
             if "<|endoftext|>" in line:
                 line = line.replace("<|endoftext|>", "")
             guess_list.append(line)
 
     answer_list = []
-    print_rank_0('reading %s' % answer_file)
+    print_rank_0(f'reading {answer_file}')
     with open(answer_file, "r") as f:
-        for i, line in enumerate(tqdm(f)):
+        for line in tqdm(f):
             line = line.strip()
             if line == "no_passages_used":
                 line = ""

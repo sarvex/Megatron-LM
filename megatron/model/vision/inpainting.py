@@ -53,16 +53,14 @@ class VitInpaintingModel(MegatronModule):
         if not self.post_process:
             return hidden_states
         decoded_output = self.linear_decoder(hidden_states)
-        output = einops.rearrange(
-                decoded_output,
-                "b (h w) (p1 p2 c) -> b c (h p1) (w p2)",
-                p1=self.patch_dim,
-                p2=self.patch_dim,
-                h=self.img_h//self.patch_dim,
-                w=self.img_w//self.patch_dim,
-            )
-
-        return output
+        return einops.rearrange(
+            decoded_output,
+            "b (h w) (p1 p2 c) -> b c (h p1) (w p2)",
+            p1=self.patch_dim,
+            p2=self.patch_dim,
+            h=self.img_h // self.patch_dim,
+            w=self.img_w // self.patch_dim,
+        )
 
 
 class MLP(torch.nn.Module):
@@ -120,7 +118,7 @@ class MitInpaintingModel(MegatronModule):
         n, _, h, w = c4.shape
         _c4 = self.linear_c4(c4).permute(0, 2, 1).reshape(n, -1, c4.shape[2], c4.shape[3])
         _c4 = resize(_c4, size=c1.size()[2:], mode='bilinear', align_corners=False)
-    
+
         _c3 = self.linear_c3(c3).permute(0, 2, 1).reshape(n, -1, c3.shape[2], c3.shape[3])
         _c3 = resize(_c3, size=c1.size()[2:], mode='bilinear', align_corners=False)
 
@@ -131,20 +129,18 @@ class MitInpaintingModel(MegatronModule):
 
         _c = torch.cat([_c4, _c3, _c2, _c1], dim=1)
         _c = self.conv_fuse(_c)
- 
+
         x = self.norm(_c)
         x = F.relu(x, inplace=True)
         x = self.dropout(x)
 
         x = self.linear_pred(x)
 
-        output = einops.rearrange(
+        return einops.rearrange(
             x,
             "b (c p1 p2) h w -> b c (h p1) (w p2)",
             p1=self.patch_dim,
             p2=self.patch_dim,
-            h=self.img_h//self.patch_dim,
-            w=self.img_w//self.patch_dim,
+            h=self.img_h // self.patch_dim,
+            w=self.img_w // self.patch_dim,
         )
-
-        return output

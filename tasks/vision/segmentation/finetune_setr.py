@@ -76,10 +76,7 @@ def segmentation():
         # Get the batch.
         timers("batch generator", log_level=2).start()
         import types
-        if isinstance(batch, types.GeneratorType):
-            batch_ = next(batch)
-        else:
-            batch_ = batch
+        batch_ = next(batch) if isinstance(batch, types.GeneratorType) else batch
         images, masks = process_batch(batch_)
         timers("batch generator").stop()
 
@@ -87,7 +84,7 @@ def segmentation():
         if not model.training:
             images, masks, _, _ = slidingcrops(images, masks)
         #print_rank_0("images size = {}".format(images.size()))
-       
+
         if not model.training:
             output_tensor = torch.cat([model(image) for image in torch.split(images, args.micro_batch_size)])
         else:

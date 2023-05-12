@@ -33,12 +33,14 @@ def score_and_return_on_first_stage(model, tokens, lengths):
     batch_size = tokens.size(0)
     max_prompt_length = lengths.max().item()
     assert max_prompt_length == tokens.size(1)
-    
+
     if max_prompt_length > args.max_position_embeddings:
         raise ValueError("Length of prompt + tokens_to_generate longer than allowed")
-    
+
     if max_prompt_length * batch_size > args.max_tokens_to_oom:
-        raise ValueError("Too many tokens.  " + str(max_prompt_length*batch_size)+ " is greater than "+str(args.max_tokens_to_oom))
+        raise ValueError(
+            f"Too many tokens.  {str(max_prompt_length * batch_size)} is greater than {str(args.max_tokens_to_oom)}"
+        )
 
     # forward step.
     forward_step = ForwardStep(model, batch_size, max_prompt_length)
@@ -50,18 +52,18 @@ def score_and_return_on_first_stage(model, tokens, lengths):
     # Log probability of the sequence (prompt + generated tokens).
     output_log_probs = None
     output_log_probs_size = (batch_size, max_prompt_length - 1)
-    
+
     if mpu.is_pipeline_last_stage():
         output_log_probs = torch.empty(output_log_probs_size,
                                        dtype=torch.float32,
                                        device=torch.cuda.current_device())
-    
+
     # =============
     # Run infernece
     # =============
     with torch.no_grad():
         attention_mask, position_ids = _build_attention_mask_and_position_ids(tokens)
-        
+
         # logits will be meanigful only in the last pipeline stage.
         logits = forward_step(tokens, position_ids, attention_mask)
 
@@ -69,20 +71,20 @@ def score_and_return_on_first_stage(model, tokens, lengths):
             # Always the last stage should have an output.
             assert logits is not None
             log_probs = F.log_softmax(logits, dim=2)
-            
+
             # Pick the tokens that we need to get the log
             # probabilities for. Note that next input token is
             # the token which we selected in the current logits,
             # so shift by 1.
             indices = torch.unsqueeze(tokens[:, 1:], 2)
             output_log_probs = torch.gather(log_probs, 2, indices).squeeze(2)
-    
+
     # ======================================
     # Broadcast to the first pipeline stage.
     # ======================================
     output_log_probs = broadcast_from_last_to_first_pipeline_stage(
         output_log_probs_size, torch.float32, output_log_probs)
-    
+
     return tokens, lengths, output_log_probs
 
 def generate_tokens_probs_and_return_on_first_stage(
@@ -131,20 +133,18 @@ def generate_tokens_probs_and_return_on_first_stage(
 
     if max_sequence_length > args.max_position_embeddings:
         raise ValueError("Length of prompt + tokens_to_generate longer than allowed")
-    
+
     if max_sequence_length * batch_size > args.max_tokens_to_oom:
-        raise ValueError("Too many tokens.  " + str(max_sequence_length*batch_size)+ " is greater than "+str(args.max_tokens_to_oom))
+        raise ValueError(
+            f"Too many tokens.  {str(max_sequence_length * batch_size)} is greater than {str(args.max_tokens_to_oom)}"
+        )
 
     # forward step.
     forward_step = ForwardStep(model, batch_size, max_sequence_length)
 
     # Added termination_id to support the case that we want to terminate the
     # generation once that id is generated.
-    if hasattr(args, 'eos_id'):
-        termination_id = args.eos_id
-    else:
-        termination_id = tokenizer.eod
-
+    termination_id = args.eos_id if hasattr(args, 'eos_id') else tokenizer.eod
     # ===================
     # Pre-allocate memory
     # ===================
@@ -162,7 +162,7 @@ def generate_tokens_probs_and_return_on_first_stage(
         generated_sequence_lengths = torch.ones(
                 batch_size, dtype=torch.int64,
                 device=torch.cuda.current_device()) * max_sequence_length
-    
+
     # Whether we have reached a termination id.
     is_generation_done = torch.zeros(batch_size, dtype=torch.uint8,
                                      device=torch.cuda.current_device())
@@ -213,19 +213,19 @@ def generate_tokens_probs_and_return_on_first_stage(
                 # Calculate the log probabilities.
                 if return_output_log_probs:
                     log_probs = F.log_softmax(logits, dim=2)
-                    if return_output_log_probs:
-                        # Pick the tokens that we need to get the log
-                        # probabilities for. Note that next input token is
-                        # the token which we selected in the current logits,
-                        # so shift by 1.
-                        indices = torch.unsqueeze(
-                            tokens[
-                                :,
-                                (prev_context_length + 1):(context_length + 1)],
-                            2)
-                        output_log_probs[:,
-                                         prev_context_length:context_length] = \
-                            torch.gather(log_probs, 2, indices).squeeze(2)
+                if return_output_log_probs:
+                    # Pick the tokens that we need to get the log
+                    # probabilities for. Note that next input token is
+                    # the token which we selected in the current logits,
+                    # so shift by 1.
+                    indices = torch.unsqueeze(
+                        tokens[
+                            :,
+                            (prev_context_length + 1):(context_length + 1)],
+                        2)
+                    output_log_probs[:,
+                                     prev_context_length:context_length] = \
+                        torch.gather(log_probs, 2, indices).squeeze(2)
 
             # Update the tokens on the first stage so the next input to
             # the network is correct.
@@ -251,7 +251,7 @@ def generate_tokens_probs_and_return_on_first_stage(
                 else: 
                     done_token = (new_sample == termination_id).byte() & \
                         started.byte()
-                
+
                 just_finished = (done_token & ~is_generation_done).bool()
                 generated_sequence_lengths[just_finished.view(-1)] = \
                     context_length + 1
@@ -261,15 +261,14 @@ def generate_tokens_probs_and_return_on_first_stage(
                                                       tensor=done)
             if use_eod_token_for_early_termination and done:
                 break
-            
+
     # ===================================================
     # Update the length of based on max generated length.
     # ===================================================
 
     tokens = tokens[:, :(context_length + 1)]
-    if mpu.is_pipeline_last_stage():
-        if return_output_log_probs:
-            output_log_probs = output_log_probs[:, :context_length]
+    if mpu.is_pipeline_last_stage() and return_output_log_probs:
+        output_log_probs = output_log_probs[:, :context_length]
 
     # ======================================
     # Broadcast to the first pipeline stage.

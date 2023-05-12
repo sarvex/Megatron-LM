@@ -24,15 +24,13 @@ def general_ict_model_provider(only_query_model=False, only_block_model=False):
 
     print_rank_0('building ICTBertModel...')
 
-    # simpler to just keep using 2 tokentypes since the LM we initialize with has 2 tokentypes
-    model = ICTBertModel(
+    return ICTBertModel(
         ict_head_size=args.ict_head_size,
         num_tokentypes=2,
         parallel_output=True,
         only_query_model=only_query_model,
-        only_block_model=only_block_model)
-
-    return model
+        only_block_model=only_block_model,
+    )
 
 
 class ICTBertModel(MegatronModule):
@@ -126,8 +124,9 @@ class ICTBertModel(MegatronModule):
 
         checkpoint_name = get_checkpoint_name(args.bert_load, iteration, False)
         if mpu.get_data_parallel_rank() == 0:
-            print('global rank {} is loading checkpoint {}'.format(
-                torch.distributed.get_rank(), checkpoint_name))
+            print(
+                f'global rank {torch.distributed.get_rank()} is loading checkpoint {checkpoint_name}'
+            )
 
         try:
             state_dict = torch.load(checkpoint_name, map_location='cpu')
@@ -185,12 +184,13 @@ class IREncoderBertModel(MegatronModule):
         """For easy load when model is combined with other heads,
         add an extra key."""
 
-        state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(prefix=prefix,
-                                                                 keep_vars=keep_vars)
+        state_dict_ = {
+            self._language_model_key: self.language_model.state_dict_for_save_checkpoint(
+                prefix=prefix, keep_vars=keep_vars
+            )
+        }
         state_dict_[self._ict_head_key] \
-            = self.ict_head.state_dict(prefix=prefix,
+                = self.ict_head.state_dict(prefix=prefix,
                                        keep_vars=keep_vars)
         return state_dict_
 

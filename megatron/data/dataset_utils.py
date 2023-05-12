@@ -64,11 +64,13 @@ def get_datasets_weights_and_num_samples(data_prefix,
     # not uniformly distribute the number of samples, we still have
     # samples left to feed to the network.
     if isinstance(train_valid_test_num_samples, list):
-        datasets_train_valid_test_num_samples = []
-        for weight in weights:
-            datasets_train_valid_test_num_samples.append(
-                [int(math.ceil(val * weight * 1.005))
-                for val in train_valid_test_num_samples])
+        datasets_train_valid_test_num_samples = [
+            [
+                int(math.ceil(val * weight * 1.005))
+                for val in train_valid_test_num_samples
+            ]
+            for weight in weights
+        ]
     else:
         # Used when separate dataset files are provided for train,
         # valid and test
@@ -100,12 +102,7 @@ def get_a_and_b_segments(sample, np_rng):
     # Make sure we always have two sentences.
     assert n_sentences > 1, 'make sure each sample has at least two sentences.'
 
-    # First part:
-    # `a_end` is how many sentences go into the `A`.
-    a_end = 1
-    if n_sentences >= 3:
-        # Note that randin in numpy is exclusive.
-        a_end = np_rng.randint(1, n_sentences)
+    a_end = np_rng.randint(1, n_sentences) if n_sentences >= 3 else 1
     tokens_a = []
     for j in range(a_end):
         tokens_a.extend(sample[j])
@@ -147,11 +144,8 @@ def truncate_segments(tokens_a, tokens_b, len_a, len_b, max_num_tokens, np_rng):
 def create_tokens_and_tokentypes(tokens_a, tokens_b, cls_id, sep_id):
     """Merge segments A and B, add [CLS] and [SEP] and build tokentypes."""
 
-    tokens = []
-    tokentypes = []
-    # [CLS].
-    tokens.append(cls_id)
-    tokentypes.append(0)
+    tokens = [cls_id]
+    tokentypes = [0]
     # Segment A.
     for token in tokens_a:
         tokens.append(token)
@@ -206,7 +200,7 @@ def create_masked_lm_predictions(tokens,
     token_boundary = [0] * len(tokens)
 
     for (i, token) in enumerate(tokens):
-        if token == cls_id or token == sep_id:
+        if token in [cls_id, sep_id]:
             token_boundary[i] = 1
             continue
         # Whole Word Masking means that if we mask all of the wordpieces
@@ -215,8 +209,11 @@ def create_masked_lm_predictions(tokens,
         # Note that Whole Word Masking does *not* change the training code
         # at all -- we still predict each WordPiece independently, softmaxed
         # over the entire vocabulary.
-        if (do_whole_word_mask and len(cand_indexes) >= 1 and
-                not is_start_piece(vocab_id_to_token_dict[token])):
+        if (
+            do_whole_word_mask
+            and cand_indexes
+            and not is_start_piece(vocab_id_to_token_dict[token])
+        ):
             cand_indexes[-1].append(i)
         else:
             cand_indexes.append([i])
@@ -246,9 +243,7 @@ def create_masked_lm_predictions(tokens,
 
     ngram_indexes = []
     for idx in range(len(cand_indexes)):
-        ngram_index = []
-        for n in ngrams:
-            ngram_index.append(cand_indexes[idx:idx + n])
+        ngram_index = [cand_indexes[idx:idx + n] for n in ngrams]
         ngram_indexes.append(ngram_index)
 
     np_rng.shuffle(ngram_indexes)
@@ -301,18 +296,24 @@ def create_masked_lm_predictions(tokens,
         for index in index_set:
             covered_indexes.add(index)
             masked_token = None
-            if masking_style == "bert":
-                # 80% of the time, replace with [MASK]
-                if np_rng.random() < 0.8:
-                    masked_token = mask_id
-                else:
-                    # 10% of the time, keep original
-                    if np_rng.random() < 0.5:
-                        masked_token = tokens[index]
-                    # 10% of the time, replace with random word
-                    else:
-                        masked_token = vocab_id_list[np_rng.randint(0, len(vocab_id_list))]
-            elif masking_style == "t5":
+            if (
+                masking_style == "bert"
+                and np_rng.random() >= 0.8
+                and np_rng.random() < 0.5
+            ):
+                masked_token = tokens[index]
+            elif (
+                masking_style == "bert"
+                and np_rng.random() >= 0.8
+                and np_rng.random() >= 0.5
+            ):
+                masked_token = vocab_id_list[np_rng.randint(0, len(vocab_id_list))]
+            elif (
+                masking_style == "bert"
+                and np_rng.random() < 0.8
+                or masking_style != "bert"
+                and masking_style == "t5"
+            ):
                 masked_token = mask_id
             else:
                 raise ValueError("invalid value of masking style")
@@ -602,10 +603,10 @@ def get_indexed_dataset_(data_prefix, data_impl, skip_warmup):
                  'seconds'.format(time.time() - start_time))
 
     print_rank_0(' > indexed dataset stats:')
-    print_rank_0('    number of documents: {}'.format(
-        indexed_dataset.doc_idx.shape[0] - 1))
-    print_rank_0('    number of sentences: {}'.format(
-        indexed_dataset.sizes.shape[0]))
+    print_rank_0(
+        f'    number of documents: {indexed_dataset.doc_idx.shape[0] - 1}'
+    )
+    print_rank_0(f'    number of sentences: {indexed_dataset.sizes.shape[0]}')
 
     return indexed_dataset
 
@@ -627,9 +628,10 @@ def get_train_valid_test_split_(splits_string, size):
     assert splits_sum > 0.0
     splits = [split / splits_sum for split in splits]
     splits_index = [0]
-    for index, split in enumerate(splits):
-        splits_index.append(splits_index[index] +
-                            int(round(split * float(size))))
+    splits_index.extend(
+        splits_index[index] + int(round(split * float(size)))
+        for index, split in enumerate(splits)
+    )
     diff = splits_index[-1] - size
     for index in range(1, len(splits_index)):
         splits_index[index] -= diff
@@ -658,21 +660,22 @@ def get_samples_mapping(indexed_dataset,
 
     # Filename of the index mapping
     indexmap_filename = data_prefix
-    indexmap_filename += '_{}_indexmap'.format(name)
+    indexmap_filename += f'_{name}_indexmap'
     if num_epochs != (np.iinfo(np.int32).max - 1):
-        indexmap_filename += '_{}ep'.format(num_epochs)
+        indexmap_filename += f'_{num_epochs}ep'
     if max_num_samples != (np.iinfo(np.int64).max - 1):
-        indexmap_filename += '_{}mns'.format(max_num_samples)
-    indexmap_filename += '_{}msl'.format(max_seq_length)
+        indexmap_filename += f'_{max_num_samples}mns'
+    indexmap_filename += f'_{max_seq_length}msl'
     indexmap_filename += '_{:0.2f}ssp'.format(short_seq_prob)
-    indexmap_filename += '_{}s'.format(seed)
+    indexmap_filename += f'_{seed}s'
     indexmap_filename += '.npy'
 
     # Build the indexed mapping if not exist.
     if torch.distributed.get_rank() == 0 and \
        not os.path.isfile(indexmap_filename):
-        print(' > WARNING: could not find index map file {}, building '
-              'the indices on rank 0 ...'.format(indexmap_filename))
+        print(
+            f' > WARNING: could not find index map file {indexmap_filename}, building the indices on rank 0 ...'
+        )
 
         # Make sure the types match the helpers input types.
         assert indexed_dataset.doc_idx.dtype == np.int64
@@ -681,8 +684,7 @@ def get_samples_mapping(indexed_dataset,
         # Build samples mapping
         verbose = torch.distributed.get_rank() == 0
         start_time = time.time()
-        print_rank_0(' > building samples index mapping for {} ...'.format(
-            name))
+        print_rank_0(f' > building samples index mapping for {name} ...')
         # First compile and then import.
         from megatron.data import helpers
         samples_mapping = helpers.build_mapping(
@@ -697,8 +699,7 @@ def get_samples_mapping(indexed_dataset,
             2 if binary_head else 1)
         print_rank_0(' > done building samples index maping')
         np.save(indexmap_filename, samples_mapping, allow_pickle=True)
-        print_rank_0(' > saved the index mapping in {}'.format(
-            indexmap_filename))
+        print_rank_0(f' > saved the index mapping in {indexmap_filename}')
         # Make sure all the ranks have built the mapping
         print_rank_0(' > elasped time to build and save samples mapping '
                      '(seconds): {:4f}'.format(
@@ -714,13 +715,11 @@ def get_samples_mapping(indexed_dataset,
         torch.distributed.get_world_size(group=mpu.get_tensor_model_parallel_group()))
 
     # Load indexed dataset.
-    print_rank_0(' > loading indexed mapping from {}'.format(
-        indexmap_filename))
+    print_rank_0(f' > loading indexed mapping from {indexmap_filename}')
     start_time = time.time()
     samples_mapping = np.load(indexmap_filename, allow_pickle=True, mmap_mode='r')
     print_rank_0('    loaded indexed file in {:3.3f} seconds'.format(
         time.time() - start_time))
-    print_rank_0('    total number of samples: {}'.format(
-        samples_mapping.shape[0]))
+    print_rank_0(f'    total number of samples: {samples_mapping.shape[0]}')
 
     return samples_mapping

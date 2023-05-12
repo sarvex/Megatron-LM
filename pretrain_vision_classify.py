@@ -30,8 +30,9 @@ def model_provider(pre_process=True, post_process=True):
                                        pre_process=pre_process,
                                        post_process=post_process)
     else:
-        raise Exception('{} vision backbone is not supported.'.format(
-                              args.vision_backbone_type))
+        raise Exception(
+            f'{args.vision_backbone_type} vision backbone is not supported.'
+        )
     return model
 
 

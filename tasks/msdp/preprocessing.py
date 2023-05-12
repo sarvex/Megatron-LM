@@ -36,8 +36,7 @@ def get_args():
     parser.add_argument("--seed", type=int, default=1234,
                         help="random seed")
 
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 def process_wow_dataset(raw_file, processed_file, knwl_ref_file, resp_ref_file):
@@ -48,78 +47,77 @@ def process_wow_dataset(raw_file, processed_file, knwl_ref_file, resp_ref_file):
     """
 
     # loading the raw data
-    print("> Loading data from %s" % raw_file)
+    print(f"> Loading data from {raw_file}")
     with open(raw_file, "r") as fr:
         dialog_data = json.load(fr)
-    
+
     print("> Processing data ...")
-    fproc = open(processed_file, "w")
-    fknwl = open(knwl_ref_file, "w") if knwl_ref_file else None
-    fresp = open(resp_ref_file, "w") if resp_ref_file else None
-    
-    for i, sample in enumerate(tqdm(dialog_data)):
-        # get all the dialog data for a single dialog sample
-        dialog = sample["dialog"]
-        
-        turn_list = []  # collect the dialog history
-        # processing for each single dialog sample
-        for j, turn in enumerate(dialog):
-            # text of each turn
-            text = turn["text"]
-            if not (text.endswith("?") or text.endswith(".") or text.endswith("!")):
-                text = text + "."
-            
-            if j == 0:
-                # first turn
-                turn_list.append(text)
-                continue
+    with open(processed_file, "w") as fproc:
+        fknwl = open(knwl_ref_file, "w") if knwl_ref_file else None
+        fresp = open(resp_ref_file, "w") if resp_ref_file else None
 
-            speaker = turn["speaker"].lower()
-            if "wizard" in speaker:
-                checked_sentence = list(turn["checked_sentence"].values())  # knowledge
-                checked_passage = list(turn["checked_passage"].values())    # topic
-                
-                assert len(checked_sentence) <= 1
+        for sample in tqdm(dialog_data):
+            # get all the dialog data for a single dialog sample
+            dialog = sample["dialog"]
 
-                # get the ground truth knowledge
-                if len(checked_sentence) > 0:
-                    checked_sentence = checked_sentence[0]
+            turn_list = []  # collect the dialog history
+                    # processing for each single dialog sample
+            for j, turn in enumerate(dialog):
+                # text of each turn
+                text = turn["text"]
+                if not (text.endswith("?") or text.endswith(".") or text.endswith("!")):
+                    text = f"{text}."
+
+                if j == 0:
+                    # first turn
+                    turn_list.append(text)
+                    continue
+
+                speaker = turn["speaker"].lower()
+                if "wizard" in speaker:
+                    checked_sentence = list(turn["checked_sentence"].values())  # knowledge
+                    checked_passage = list(turn["checked_passage"].values())    # topic
+
+                    assert len(checked_sentence) <= 1
+
+                                    # get the ground truth knowledge
+                    checked_sentence = (
+                        checked_sentence[0]
+                        if checked_sentence
+                        else "no_passages_used"
+                    )
+                    if len(checked_passage) == 1:
+                        checked_passage = checked_passage[0]
+                    else:
+                        checked_passage = "no_passages_used"
+
+                    # get the topic
+                    if checked_passage != "no_passages_used":
+                        topic = checked_passage
+                    else:
+                        topic = sample["chosen_topic"]
+
+                    dialog_context = " [SEP] ".join(turn_list)
+                    knowledge = checked_sentence
+                    response = text
+                    # add the response into the dialog history
+                    turn_list.append(response)
+
+                    # write to the output files
+                    fproc.write(topic + "\t" + dialog_context + "\t" + \
+                                    knowledge + "\t" + response + "\n")
+
+                    if fknwl:
+                        fknwl.write(knowledge + "\n")
+                    if fresp:
+                        # tokenize for evaluation
+                        response = " ".join(word_tokenize(response))
+                        fresp.write(response + "\n")
+
                 else:
-                    checked_sentence = "no_passages_used"
+                    assert "apprentice" in speaker
+                    turn_list.append(text)
 
-                if len(checked_passage) == 1:
-                    checked_passage = checked_passage[0]
-                else:
-                    checked_passage = "no_passages_used"
-
-                # get the topic
-                if checked_passage != "no_passages_used":
-                    topic = checked_passage
-                else:
-                    topic = sample["chosen_topic"]
-                
-                dialog_context = " [SEP] ".join(turn_list)
-                knowledge = checked_sentence
-                response = text
-                # add the response into the dialog history
-                turn_list.append(response)
-
-                # write to the output files
-                fproc.write(topic + "\t" + dialog_context + "\t" + \
-                                knowledge + "\t" + response + "\n")
-                
-                if fknwl:
-                    fknwl.write(knowledge + "\n")
-                if fresp:
-                    # tokenize for evaluation
-                    response = " ".join(word_tokenize(response))
-                    fresp.write(response + "\n")
-
-            else:
-                assert "apprentice" in speaker
-                turn_list.append(text)
-
-    fproc.close()
     if fknwl:
         fknwl.close()
     if fresp:
@@ -133,108 +131,101 @@ def process_woi_dataset(raw_file, processed_file, knwl_ref_file, resp_ref_file):
       topic \t dialogue context \t golden knowledge \t golden response
     """
     
-    print("> Processing %s" % raw_file)
-    fproc = open(processed_file, "w")
-    fknwl = open(knwl_ref_file, "w") if knwl_ref_file else None
-    fresp = open(resp_ref_file, "w") if resp_ref_file else None
-    
-    with open(raw_file, "r") as fr:
-        for i, line in tqdm(enumerate(fr)):
-            # read line by line, each line uses json format
-            line = line.strip()
-            item_dict = json.loads(line)
+    print(f"> Processing {raw_file}")
+    with open(processed_file, "w") as fproc:
+        fknwl = open(knwl_ref_file, "w") if knwl_ref_file else None
+        fresp = open(resp_ref_file, "w") if resp_ref_file else None
 
-            # item_dict is a dictionary
-            # its key is the data id, and its value contains all the data content
-            item_dict = item_dict.values()
-            item_dict = list(item_dict)[0]  # len(item_dict) == 1
-            
-            # get the whole dialog data for a single dialog sample
-            dialog_data = item_dict['dialog_history']
-            length = len(dialog_data)
-            
-            turn_list = []  # collect the dialog history
-            search_text = ""
-            for i in range(length):
-                item = dialog_data[i]
-                action = item['action']
+        with open(raw_file, "r") as fr:
+            for i, line in tqdm(enumerate(fr)):
+                # read line by line, each line uses json format
+                line = line.strip()
+                item_dict = json.loads(line)
 
-                if action == "Wizard => SearchAgent":
-                    search_text = item['text']
+                # item_dict is a dictionary
+                # its key is the data id, and its value contains all the data content
+                item_dict = item_dict.values()
+                item_dict = list(item_dict)[0]  # len(item_dict) == 1
 
-                elif action == "Wizard => Apprentice":
-                    if len(turn_list) == 0:
-                        # first turn
-                        turn = item['text']
-                        turn_list.append(turn)
-                        continue
+                # get the whole dialog data for a single dialog sample
+                dialog_data = item_dict['dialog_history']
+                length = len(dialog_data)
 
-                    # get the relevant content
-                    contents = item["context"]["contents"]
-                    selects = item["context"]["selected_contents"]
-                    flag = selects[0][0]
-                    selects = selects[1:]
-                    assert len(selects) == len(contents)
-                    
-                    # get the topic
-                    if flag:
-                        # no knowledge sentence is used for the response
-                        topic = "no_topic"
-                        knwl_sent = "no_passages_used"
+                turn_list = []  # collect the dialog history
+                search_text = ""
+                for i in range(length):
+                    item = dialog_data[i]
+                    action = item['action']
+
+                    if action == "Apprentice => Wizard":
+                        turn_list.append(item['text'])
+
+                    elif action == "Wizard => Apprentice":
+                        if not turn_list:
+                            turn_list.append(item['text'])
+                            continue
+
+                        selects = item["context"]["selected_contents"]
+                        flag = selects[0][0]
+                        selects = selects[1:]
+                        contents = item["context"]["contents"]
+                        assert len(selects) == len(contents)
+
+                        # get the topic
+                        if flag:
+                            # no knowledge sentence is used for the response
+                            topic = "no_topic"
+                            knwl_sent = "no_passages_used"
+                        else:
+                            # we consider the search text as the topic
+                            topic = search_text
+                            # get the knowledge sentence
+                            knwl_sent = ""
+                            for content, select in zip(contents, selects):
+                                content = content['content']
+                                assert len(content) == len(select)
+                                for c, s in zip(content, select):
+                                    if s:
+                                        knwl_sent = c
+                                        break
+
+                        if knwl_sent == "":
+                            # no knowledge is used for the response
+                            topic = "no_topic"
+                            knwl_sent = "no_passages_used"
+
+                        # processing
+                        topic = topic.replace("\n", "").replace("\r", \
+                                    "").replace("\t", "")
+                        dialog_context = " [SEP] ".join(turn_list)
+                        dialog_context = dialog_context.replace("\n", "").replace("\r", \
+                                    "").replace("\t", "")
+                        knwl_sent = knwl_sent.replace("\n", "").replace("\r", \
+                                    "").replace("\t", "")
+                        response = item['text']
+                        response = response.replace("\n", "").replace("\r", \
+                                    "").replace("\t", "")
+
+                        if topic != "no_topic":
+                            # write to the ouput files
+                            fproc.write(topic + "\t" + dialog_context + "\t" + \
+                                            knwl_sent + "\t" + response + "\n")
+                            if fknwl:
+                                fknwl.write(knwl_sent + "\n")
+                            if fresp:
+                                # tokenize for evaluation
+                                response = " ".join(word_tokenize(response))
+                                fresp.write(response + "\n")
+
+                        turn_list.append(response)
+
+                    elif action == "Wizard => SearchAgent":
+                        search_text = item['text']
+
                     else:
-                        # we consider the search text as the topic
-                        topic = search_text
-                        # get the knowledge sentence
-                        knwl_sent = ""
-                        for content, select in zip(contents, selects):
-                            content = content['content']
-                            assert len(content) == len(select)
-                            for c, s in zip(content, select):
-                                if s:
-                                    knwl_sent = c
-                                    break
+                        assert action == "SearchAgent => Wizard", \
+                                "Please check whether you have used the correct data!"
 
-                    if knwl_sent == "":
-                        # no knowledge is used for the response
-                        topic = "no_topic"
-                        knwl_sent = "no_passages_used"
-
-                    # get dialogue context, knowledge, and response 
-                    dialog_context = " [SEP] ".join(turn_list)
-                    response = item['text']
-
-                    # processing
-                    topic = topic.replace("\n", "").replace("\r", \
-                                "").replace("\t", "")
-                    dialog_context = dialog_context.replace("\n", "").replace("\r", \
-                                "").replace("\t", "")
-                    knwl_sent = knwl_sent.replace("\n", "").replace("\r", \
-                                "").replace("\t", "")
-                    response = response.replace("\n", "").replace("\r", \
-                                "").replace("\t", "")
-                    
-                    if topic != "no_topic":
-                        # write to the ouput files
-                        fproc.write(topic + "\t" + dialog_context + "\t" + \
-                                        knwl_sent + "\t" + response + "\n")
-                        if fknwl:
-                            fknwl.write(knwl_sent + "\n")
-                        if fresp:
-                            # tokenize for evaluation
-                            response = " ".join(word_tokenize(response))
-                            fresp.write(response + "\n")
-
-                    turn_list.append(response)
-
-                elif action == "Apprentice => Wizard":
-                    turn = item['text']
-                    turn_list.append(turn)
-
-                else:
-                    assert action == "SearchAgent => Wizard", \
-                            "Please check whether you have used the correct data!"
-
-    fproc.close()
     if fknwl:
         fknwl.close()
     if fresp:
@@ -248,16 +239,16 @@ def get_database(test_datapath, train_datapath, data_type):
                 "Please input a correct data type!!"
 
     # get test data topic dictionary
-    print("> reading test data from %s" % test_datapath)
+    print(f"> reading test data from {test_datapath}")
     test_topics = {}
     with open(test_datapath, "r") as f:
-        for i, line in enumerate(f):
+        for line in f:
             line = line.strip()
             splits = line.split("\t")
             topic = splits[0]
             test_topics[topic] = True
 
-    print("> reading data from %s" % train_datapath)
+    print(f"> reading data from {train_datapath}")
     train_data_by_topic = {}
     dialog_data_by_topic = {}
     dialog_examples = []
@@ -273,38 +264,39 @@ def get_database(test_datapath, train_datapath, data_type):
             if knowledge == "no_passages_used":
                 # when no knowledge is used
                 continue
-            if data_type != "wow_seen" and ("(" in knowledge or ")" in knowledge):
-                # when bracket exists in the knowledge
-                continue
-            if data_type != "wow_seen" and topic not in knowledge:
-                # when topic does not exist in the knowledge
-                continue
+            if data_type != "wow_seen":
+                if ("(" in knowledge or ")" in knowledge):
+                    # when bracket exists in the knowledge
+                    continue
+                if topic not in knowledge:
+                    # when topic does not exist in the knowledge
+                    continue
 
             # get the instance
             last_turn = turns[-1]
-            instance = "( " + last_turn + " ) " + topic + " => " + knowledge
-            
+            instance = f"( {last_turn} ) {topic} => {knowledge}"
+
             # construct dialog example
             dialog_example = ""
             if data_type != "wow_seen":
-                dialog_example += "( " + topic + " ) "
+                dialog_example += f"( {topic} ) "
             for i, turn in enumerate(turns):
                 if i != 0:
                     dialog_example += " "
                 dialog_example += turn
-            
+
             # check overlaps
             if topic in test_topics:
                 if topic not in train_data_by_topic:
                     train_data_by_topic[topic] = [instance]
                 else:
                     train_data_by_topic[topic].append(instance)
-                
+
                 if topic not in dialog_data_by_topic:
                     dialog_data_by_topic[topic] = [dialog_example]
                 else:
                     dialog_data_by_topic[topic].append(dialog_example)
-            
+
             else:
                 # filtering data samples
                 if len(knowledge.split()) > 20:
@@ -313,7 +305,7 @@ def get_database(test_datapath, train_datapath, data_type):
                 if knowledge.startswith("It") or knowledge.startswith("it") or \
                    knowledge.startswith("This") or knowledge.startswith("this"):
                     continue
-                
+
             # append all the data into dialogue examples list
             dialog_examples.append((topic, dialog_example, instance))
 
@@ -331,7 +323,7 @@ def select_prompts_based_on_similarity(
         query_ids = torch.LongTensor([query_ids]).cuda()
         query_emb = encoder(input_ids=query_ids).pooler_output
         query_emb = query_emb[0]
-        
+
         # calculate embeddings for the samples in the database
         if topic in emb_dict:
             example_embeddings = emb_dict[topic]
@@ -351,15 +343,10 @@ def select_prompts_based_on_similarity(
         # compare the similarity and select the topk samples
         similarity_list = example_embeddings.matmul(query_emb)
         _, indices = torch.topk(similarity_list, k=topk)
-    
+
     indices = indices.tolist()
     indices = indices[::-1] # reverse the order
-    selected_prompts = []
-    for index in indices:
-        # index = index.item()
-        selected_prompts.append(prompt_list[index])
-
-    return selected_prompts
+    return [prompt_list[index] for index in indices]
 
 
 def prompt_selection_for_knowledge_generation(

@@ -287,8 +287,7 @@ def attention_mask_func(attention_scores, attention_mask):
 def forward_torch_softmax(input, mask, scale):
     input = input * scale
     mask_output = attention_mask_func(input, mask) if mask is not None else input
-    probs = torch.nn.Softmax(dim=-1)(mask_output)
-    return probs
+    return torch.nn.Softmax(dim=-1)(mask_output)
 
 
 def test_masked_softmax_forward():

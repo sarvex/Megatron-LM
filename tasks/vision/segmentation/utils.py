@@ -9,39 +9,38 @@ def slidingcrops(img, mask):
     args = get_args()
     assert args.img_h == args.img_w
     crop_size = args.img_h
-    stride = args.seg_stride
-    ignore_index = args.ignore_index
     n, c, h, w = img.shape
     assert h >= crop_size
     assert w >= crop_size
     long_size = max(h, w)
 
     img_slices, mask_slices, slices_info = [], [], []
-    if long_size > crop_size:
-        assert stride <= crop_size
-        h_step_num = int(math.ceil((h - crop_size) / float(stride))) + 1
-        w_step_num = int(math.ceil((w - crop_size) / float(stride))) + 1
-        for yy in range(h_step_num):
-            for xx in range(w_step_num):
-                sy, sx = yy * stride, xx * stride
-                ey, ex = sy + crop_size, sx + crop_size
-                img_sub = img[:, :, sy: ey, sx: ex]
-                mask_sub = mask[:, sy: ey, sx: ex]
-
-                # padding
-                sub_h, sub_w = img_sub.shape[2:]
-                pad_h = max(crop_size - sub_h, 0)
-                pad_w = max(crop_size - sub_w, 0)
-                img_sub = torch.nn.functional.pad(img_sub, pad=(0, pad_w, 0, pad_h), value=ignore_index)
-                mask_sub = torch.nn.functional.pad(mask_sub, pad=(0, pad_w, 0, pad_h))
-
-                img_slices.append(img_sub)
-                mask_slices.append(mask_sub)
-                slices_info.append([sy, ey, sx, ex, sub_h, sub_w])
-
-        return torch.cat(img_slices), torch.cat(mask_slices), slices_info, (h, w)
-    else:
+    if long_size <= crop_size:
         return img, mask, [[0, h, 0, w, h, w]], (h, w)
+    stride = args.seg_stride
+    assert stride <= crop_size
+    h_step_num = int(math.ceil((h - crop_size) / float(stride))) + 1
+    w_step_num = int(math.ceil((w - crop_size) / float(stride))) + 1
+    ignore_index = args.ignore_index
+    for yy in range(h_step_num):
+        for xx in range(w_step_num):
+            sy, sx = yy * stride, xx * stride
+            ey, ex = sy + crop_size, sx + crop_size
+            img_sub = img[:, :, sy: ey, sx: ex]
+            mask_sub = mask[:, sy: ey, sx: ex]
+
+            # padding
+            sub_h, sub_w = img_sub.shape[2:]
+            pad_h = max(crop_size - sub_h, 0)
+            pad_w = max(crop_size - sub_w, 0)
+            img_sub = torch.nn.functional.pad(img_sub, pad=(0, pad_w, 0, pad_h), value=ignore_index)
+            mask_sub = torch.nn.functional.pad(mask_sub, pad=(0, pad_w, 0, pad_h))
+
+            img_slices.append(img_sub)
+            mask_slices.append(mask_sub)
+            slices_info.append([sy, ey, sx, ex, sub_h, sub_w])
+
+    return torch.cat(img_slices), torch.cat(mask_slices), slices_info, (h, w)
 
 
 def slidingjoins(preds, probs, labels, slices_info, img_size):

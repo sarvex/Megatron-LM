@@ -47,8 +47,11 @@ def window_partition(x, window_size):
     """
     B, H, W, C = x.shape
     x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
-    return windows
+    return (
+        x.permute(0, 1, 3, 2, 4, 5)
+        .contiguous()
+        .view(-1, window_size, window_size, C)
+    )
 
 
 def window_reverse(windows, window_size, H, W):
@@ -138,10 +141,7 @@ class WindowAttention(nn.Module):
             nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, N, N)
-            attn = self.softmax(attn)
-        else:
-            attn = self.softmax(attn)
-
+        attn = self.softmax(attn)
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
@@ -237,7 +237,9 @@ class SwinTransformerBlock(nn.Module):
         mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
         mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
-        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
+        attn_mask = attn_mask.masked_fill(attn_mask != 0, -100.0).masked_fill(
+            attn_mask == 0, 0.0
+        )
 
         return attn_mask
 
@@ -399,10 +401,7 @@ class BasicLayer(nn.Module):
 
     def forward(self, x):
         for blk in self.blocks:
-            if self.use_checkpoint:
-                x = checkpoint.checkpoint(blk, x)
-            else:
-                x = blk(x)
+            x = checkpoint.checkpoint(blk, x) if self.use_checkpoint else blk(x)
         x_b4_ds = x
         if self.downsample is not None:
             x = self.downsample(x)
@@ -412,9 +411,7 @@ class BasicLayer(nn.Module):
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
 
     def flops(self):
-        flops = 0
-        for blk in self.blocks:
-            flops += blk.flops()
+        flops = sum(blk.flops() for blk in self.blocks)
         if self.downsample is not None:
             flops += self.downsample.flops()
         return flops
@@ -445,10 +442,7 @@ class PatchEmbed(nn.Module):
         self.embed_dim = embed_dim
 
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-        if norm_layer is not None:
-            self.norm = norm_layer(embed_dim)
-        else:
-            self.norm = None
+        self.norm = norm_layer(embed_dim) if norm_layer is not None else None
 
     def forward(self, x):
         B, C, H, W = x.shape
@@ -587,15 +581,12 @@ class SwinTransformer(nn.Module):
             h, w = h//2, w//2
             outs.append(px)
 
-        if self.output_avg:
-            return outs[-1].mean(dim=1)
-
-        return outs
+        return outs[-1].mean(dim=1) if self.output_avg else outs
 
     def flops(self):
         flops = 0
         flops += self.patch_embed.flops()
-        for i, layer in enumerate(self.layers):
+        for layer in self.layers:
             flops += layer.flops()
         flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
         flops += self.num_features * self.num_classes
@@ -609,8 +600,11 @@ def get_swin(drop_path_rate=0.3, output_avg=False):
     embed_dim = 128
     depths = [2, 2, 18, 2]
     num_heads = [4, 8, 16, 32]
-    swin = SwinTransformer(
-        img_size=(args.img_h, args.img_w,),
+    return SwinTransformer(
+        img_size=(
+            args.img_h,
+            args.img_w,
+        ),
         in_chans=3,
         patch_size=args.patch_dim,
         embed_dim=embed_dim,
@@ -620,6 +614,4 @@ def get_swin(drop_path_rate=0.3, output_avg=False):
         drop_path_rate=drop_path_rate,
         output_avg=output_avg,
     )
-
-    return swin
 

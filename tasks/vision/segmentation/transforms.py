@@ -175,15 +175,8 @@ class RandomCrop(object):
 
     @staticmethod
     def crop_in_image(target_w, target_h, w, h, img, mask):
-        if w == target_w:
-            x1 = 0
-        else:
-            x1 = random.randint(0, w - target_w)
-        if h == target_h:
-            y1 = 0
-        else:
-            y1 = random.randint(0, h - target_h)
-
+        x1 = 0 if w == target_w else random.randint(0, w - target_w)
+        y1 = 0 if h == target_h else random.randint(0, h - target_h)
         return [img.crop((x1, y1, x1 + target_w, y1 + target_h)),
                 mask.crop((x1, y1, x1 + target_w, y1 + target_h))]
 
@@ -196,14 +189,8 @@ class RandomCrop(object):
             return img, mask
 
         # Pad image if image < crop
-        if target_h > h:
-            pad_h = (target_h - h) // 2 + 1
-        else:
-            pad_h = 0
-        if target_w > w:
-            pad_w = (target_w - w) // 2 + 1
-        else:
-            pad_w = 0
+        pad_h = (target_h - h) // 2 + 1 if target_h > h else 0
+        pad_w = (target_w - w) // 2 + 1 if target_w > w else 0
         border = (pad_w, pad_h, pad_w, pad_h)
         if pad_h or pad_w:
             img = ImageOps.expand(img, border=border, fill=(0, 0, 0))
@@ -228,7 +215,7 @@ class RandomCrop(object):
         # crop semantic seg
         mask = self.crop(mask, crop_bbox)
         assert(img.size[0] == self.size[1] and img.size[1] == self.size[0])
-          
+
         return img, mask
 
 
@@ -272,7 +259,7 @@ def adjust_brightness(img, brightness_factor):
         PIL Image: Brightness adjusted image.
     """
     if not _is_pil_image(img):
-        raise TypeError('img should be PIL Image. Got {}'.format(type(img)))
+        raise TypeError(f'img should be PIL Image. Got {type(img)}')
 
     enhancer = ImageEnhance.Brightness(img)
     img = enhancer.enhance(brightness_factor)
@@ -292,7 +279,7 @@ def adjust_contrast(img, contrast_factor):
         PIL Image: Contrast adjusted image.
     """
     if not _is_pil_image(img):
-        raise TypeError('img should be PIL Image. Got {}'.format(type(img)))
+        raise TypeError(f'img should be PIL Image. Got {type(img)}')
 
     enhancer = ImageEnhance.Contrast(img)
     img = enhancer.enhance(contrast_factor)
@@ -312,7 +299,7 @@ def adjust_saturation(img, saturation_factor):
         PIL Image: Saturation adjusted image.
     """
     if not _is_pil_image(img):
-        raise TypeError('img should be PIL Image. Got {}'.format(type(img)))
+        raise TypeError(f'img should be PIL Image. Got {type(img)}')
 
     enhancer = ImageEnhance.Color(img)
     img = enhancer.enhance(saturation_factor)
@@ -346,7 +333,7 @@ def adjust_hue(img, hue_factor):
         raise ValueError('hue_factor is not in [-0.5, 0.5].'.format(hue_factor))
 
     if not _is_pil_image(img):
-        raise TypeError('img should be PIL Image. Got {}'.format(type(img)))
+        raise TypeError(f'img should be PIL Image. Got {type(img)}')
 
     input_mode = img.mode
     if input_mode in {'L', '1', 'I', 'F'}:
@@ -415,9 +402,7 @@ class ColorJitter(object):
                 torch_tr.Lambda(lambda img: adjust_hue(img, hue_factor)))
 
         np.random.shuffle(transforms)
-        transform = torch_tr.Compose(transforms)
-
-        return transform
+        return torch_tr.Compose(transforms)
 
     def __call__(self, img):
         """

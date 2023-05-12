@@ -42,8 +42,7 @@ class SetrSegmentationModel(MegatronModule):
     def forward(self, input):
         # [b hw c]
         hidden_states = self.backbone(input)
-        result_final = self.head(hidden_states)
-        return result_final
+        return self.head(hidden_states)
 
 
 class SegformerSegmentationModel(MegatronModule):

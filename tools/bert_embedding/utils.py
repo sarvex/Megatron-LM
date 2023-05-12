@@ -82,14 +82,17 @@ def get_missing_blocks(workdir, n_samples, block_size,
 
     # All block files (existing + missing).
     n_digits = int(np.ceil(np.log(n_samples) / np.log(10)) + 1)
-    all_blocks = [{
-        "range" : r,
-        "path" : os.path.join(
-            workdir,
-            "%s-%s.hdf5" % tuple([ str(i).zfill(n_digits) for i in r ]),
-        )
-    } for r in block_ranges]
-    all_block_path_set = set(block["path"] for block in all_blocks)
+    all_blocks = [
+        {
+            "range": r,
+            "path": os.path.join(
+                workdir,
+                "%s-%s.hdf5" % tuple(str(i).zfill(n_digits) for i in r),
+            ),
+        }
+        for r in block_ranges
+    ]
+    all_block_path_set = {block["path"] for block in all_blocks}
 
     # Delete corrupt files.
     if torch.distributed.get_rank() == 0:
@@ -99,32 +102,23 @@ def get_missing_blocks(workdir, n_samples, block_size,
         for index, path in enumerate(
                 tqdm(existing_block_paths, "validating block.")):
 
-            assert path in all_block_path_set, "unexpected filename, '%s'." % path
+            assert path in all_block_path_set, f"unexpected filename, '{path}'."
 
             try:
                 f = h5py.File(path, "r")
             except:
-                raise Exception("unable to open/validate '%s'." % path)
-                os.remove(path)
-                continue
-
+                raise Exception(f"unable to open/validate '{path}'.")
             try:
                 validate(f)
             except:
                 raise Exception("delete block file.")
-                os.remove(path)
             finally:
                 f.close()
 
     # Wait for files to be deleted.
     torch.distributed.barrier()
 
-    # Filter missing files.
-    missing_blocks = [block
-                      for block in all_blocks
-                      if not os.path.exists(block["path"])]
-
-    return missing_blocks
+    return [block for block in all_blocks if not os.path.exists(block["path"])]
 
 
 def get_missing_blocks_by_rank(workdir, n_samples, block_size,
@@ -188,15 +182,15 @@ class IdPathMap:
 def path_to_range(path):
     '''Parse start/end indexes from block path name (e.g., 00010-00011.hdf5 ->
     (10, 11).'''
-    return tuple([
-        int(i) for i in os.path.splitext(
-            os.path.basename(path))[0].split("-")])
+    return tuple(
+        int(i) for i in os.path.splitext(os.path.basename(path))[0].split("-")
+    )
 
 
 def get_index_path_map(_dir):
     '''Map contained indexes to block file path (on disk).'''
 
-    paths = sorted(glob.glob(_dir + "/*.hdf5"))
+    paths = sorted(glob.glob(f"{_dir}/*.hdf5"))
 
     # Build index-path map.
     idx_path_map = IdPathMap(paths)

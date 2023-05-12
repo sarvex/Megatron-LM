@@ -29,14 +29,13 @@ def model_provider(pre_process=True, post_process=True):
 
     args = get_args()
     num_tokentypes = 2 if args.bert_binary_head else 0
-    model = BertModel(
+    return BertModel(
         num_tokentypes=num_tokentypes,
         add_binary_head=args.bert_binary_head,
         parallel_output=True,
         pre_process=pre_process,
-        post_process=post_process)
-
-    return model
+        post_process=post_process,
+    )
 
 
 def get_batch(data_iterator):
@@ -48,10 +47,7 @@ def get_batch(data_iterator):
     datatype = torch.int64
 
     # Broadcast data.
-    if data_iterator is not None:
-        data = next(data_iterator)
-    else:
-        data = None
+    data = next(data_iterator) if data_iterator is not None else None
     data_b = core.tensor_parallel.broadcast_data(keys, data, datatype)
 
     # Unpack.
@@ -118,23 +114,20 @@ def collate_batch(samples):
     # Pad samples.
     padded_samples = []
     for sample in samples:
-        padded_sample = {}
-        for key in keys:
-            padded_sample[key] = \
-                np.pad(
-                    sample[key],
-                    (0, max_length_map[key] - len(sample[key])),
-                    mode="constant",
-                    constant_values=tokenizer.pad_id if key == "text" else 0,
-                ) \
-                if isinstance(sample[key], np.ndarray) else \
-                   sample[key]
+        padded_sample = {
+            key: np.pad(
+                sample[key],
+                (0, max_length_map[key] - len(sample[key])),
+                mode="constant",
+                constant_values=tokenizer.pad_id if key == "text" else 0,
+            )
+            if isinstance(sample[key], np.ndarray)
+            else sample[key]
+            for key in keys
+        }
         padded_samples.append(padded_sample)
 
-    # Build batch with padded samples.
-    batch = default_collate(padded_samples)
-
-    return batch
+    return default_collate(padded_samples)
 
 
 def get_data_loader(dataset, batch_size):
@@ -153,14 +146,13 @@ def get_data_loader(dataset, batch_size):
         drop_last=False,
     )
 
-    # Data loader.
-    data_loader = DataLoader(dataset,
-                             batch_sampler=batch_sampler,
-                             num_workers=args.num_workers,
-                             pin_memory=True,
-                             collate_fn=collate_batch)
-
-    return data_loader
+    return DataLoader(
+        dataset,
+        batch_sampler=batch_sampler,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        collate_fn=collate_batch,
+    )
 
 
 def embed_data_loader(models, data_loader):
@@ -186,10 +178,7 @@ def embed_data_loader(models, data_loader):
             result = forward_step(data_iterator, models[0])
             embeddings.append(result[0].detach().cpu().numpy())
 
-    # Concatenate embeddings.
-    embeddings = np.concatenate(embeddings, axis=0)
-
-    return embeddings
+    return np.concatenate(embeddings, axis=0)
 
 
 class BertEmbedder:
@@ -202,7 +191,7 @@ class BertEmbedder:
         assert args.output_bert_embeddings
 
         self.models, optimizer, opt_param_scheduler = \
-            setup_model_and_optimizer(model_provider,
+                setup_model_and_optimizer(model_provider,
                                       ModelType.encoder_or_decoder)
         self.batch_size = batch_size
         self.max_bert_seq_length = max_bert_seq_length
@@ -214,7 +203,7 @@ class BertEmbedder:
             self.huggingface_embedder = HuggingfaceEmbedder(batch_size,
                                                             max_bert_seq_length)
         else:
-            raise Exception("specialize for embedder type '%s'." % embedder_type)
+            raise Exception(f"specialize for embedder type '{embedder_type}'.")
 
     def embed_text_dataset(self, text_dataset):
         '''Embed a text dataset.'''
@@ -229,9 +218,7 @@ class BertEmbedder:
 
         # Embed.
         data_loader = get_data_loader(bert_dataset, self.batch_size)
-        embeddings = embed_data_loader(self.models, data_loader)
-
-        return embeddings
+        return embed_data_loader(self.models, data_loader)
 
     def embed_text(self, text):
         '''Embed a single text string.
@@ -252,9 +239,7 @@ class BertEmbedder:
 
         # Embed text.
         text_ds = SingleTextDataset(text)
-        embed = self.embed_text_dataset(text_ds)[0]
-
-        return embed
+        return self.embed_text_dataset(text_ds)[0]
 
 
 class DiskDataParallelBertEmbedder:

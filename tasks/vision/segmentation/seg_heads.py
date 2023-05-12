@@ -44,12 +44,9 @@ class SetrSegmentationHead(MegatronModule):
         hidden_states = torch.tanh(hidden_states)
         hidden_states = self.conv_1(hidden_states)
 
-        # [b c h w]
-        result = F.interpolate(hidden_states,
-                               size=(self.img_h, self.img_w),
-                               mode='bilinear')
-
-        return result
+        return F.interpolate(
+            hidden_states, size=(self.img_h, self.img_w), mode='bilinear'
+        )
 
 
 class MLP(torch.nn.Module):

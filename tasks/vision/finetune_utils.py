@@ -41,8 +41,7 @@ def build_data_loader(dataset, micro_batch_size,
         drop_last=drop_last, shuffle=shuffle
     )
 
-    # Data loader. Note that batch size is the per GPU batch size.
-    data_loader = torch.utils.data.DataLoader(
+    return torch.utils.data.DataLoader(
         dataset,
         batch_size=micro_batch_size,
         sampler=sampler,
@@ -51,8 +50,6 @@ def build_data_loader(dataset, micro_batch_size,
         drop_last=drop_last,
         pin_memory=True,
     )
-
-    return data_loader
 
 
 def _build_infinite_size_dataloader(dataloader):
@@ -126,7 +123,7 @@ def _train(
     # For each remaining epoch
     timers("interval-time", log_level=0).start(barrier=True)
     for epoch in range(start_epoch, args.epochs):
-        print_rank_0("working on epoch {} ...".format(epoch + 1))
+        print_rank_0(f"working on epoch {epoch + 1} ...")
 
         # Set the data loader epoch to shuffle the index iterator.
         train_dataloader.sampler.set_epoch(args.seed + epoch)
@@ -177,7 +174,7 @@ def _train(
 
             # Evaluation
             if args.eval_interval and iteration % args.eval_interval == 0:
-                prefix = "iteration {}".format(iteration)
+                prefix = f"iteration {iteration}"
                 evaluate_and_print_results(
                     prefix,
                     forward_step,
@@ -258,7 +255,9 @@ def finetune(
             unwrap_model[0].module.backbone.load_state_dict(state_dict,
                                                             strict=False)
         else:
-            raise Exception("pretrained checkpoint type {} not supported".format(args.pretrained_checkpoint_type))
+            raise Exception(
+                f"pretrained checkpoint type {args.pretrained_checkpoint_type} not supported"
+            )
 
         # This is critical when only model is loaded. We should make sure
         # master parameters are also updated.
@@ -290,11 +289,9 @@ def finetune(
             end_of_epoch_callback,
             process_non_loss_data_func,
         )
-    # Or just evaluate.
-    else:
-        if end_of_epoch_callback is not None:
-            print_rank_0("evaluation only mode, setting epoch to -1")
-            end_of_epoch_callback(model, epoch=-1)
+    elif end_of_epoch_callback is not None:
+        print_rank_0("evaluation only mode, setting epoch to -1")
+        end_of_epoch_callback(model, epoch=-1)
 
     print_rank_0("done :-)")
 

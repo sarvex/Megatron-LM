@@ -52,8 +52,11 @@ def window_partition(x, window_size):
     """
     B, H, W, C = x.shape
     x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
-    return windows
+    return (
+        x.permute(0, 1, 3, 2, 4, 5)
+        .contiguous()
+        .view(-1, window_size, window_size, C)
+    )
 
 
 def window_reverse(windows, window_size, H, W):
@@ -141,10 +144,7 @@ class WindowAttention(nn.Module):
             nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0).type(attn.type())
             attn = attn.view(-1, self.num_heads, N, N)
-            attn = self.softmax(attn)
-        else:
-            attn = self.softmax(attn)
-
+        attn = self.softmax(attn)
         attn_out = attn
         attn = self.attn_drop(attn)
 
@@ -247,7 +247,9 @@ class SwinTransformerBlock(nn.Module):
         mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
         mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
-        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
+        attn_mask = attn_mask.masked_fill(attn_mask != 0, -100.0).masked_fill(
+            attn_mask == 0, 0.0
+        )
 
         return attn_mask
 
@@ -272,12 +274,9 @@ class SwinTransformerBlock(nn.Module):
         if self.shift_size > 0:
             shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
 
-            if H in self.attn_mask_dict.keys():
-                attn_mask = self.attn_mask_dict[H]
-            else:
+            if H not in self.attn_mask_dict.keys():
                 self.attn_mask_dict[H] = self.create_attn_mask(self.H, self.W).to(x.device)
-                attn_mask = self.attn_mask_dict[H]
-
+            attn_mask = self.attn_mask_dict[H]
         else:
             shifted_x = x
             attn_mask = None
@@ -456,9 +455,7 @@ class BasicLayer(nn.Module):
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
 
     def flops(self):
-        flops = 0
-        for blk in self.blocks:
-            flops += blk.flops()
+        flops = sum(blk.flops() for blk in self.blocks)
         if self.downsample is not None:
             flops += self.downsample.flops()
         return flops
@@ -482,10 +479,7 @@ class PatchEmbed(nn.Module):
         self.embed_dim = embed_dim
 
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-        if norm_layer is not None:
-            self.norm = norm_layer(embed_dim)
-        else:
-            self.norm = None
+        self.norm = norm_layer(embed_dim) if norm_layer is not None else None
 
     def forward(self, x):
         B, C, H, W = x.shape
@@ -714,85 +708,79 @@ class SwinTransformer(nn.Module):
         return flops
 
     def init_weights(self, pretrained='', pretrained_layers=[], verbose=True):
-        if os.path.isfile(pretrained):
-            pretrained_dict = torch.load(pretrained, map_location='cpu')
-            logging.info(f'=> loading pretrained model {pretrained}')
-            model_dict = self.state_dict()
-            pretrained_dict = {
-                k: v for k, v in pretrained_dict.items()
-                if k in model_dict.keys()
-            }
-            need_init_state_dict = {}
-            for k, v in pretrained_dict.items():
-                need_init = (
-                        k.split('.')[0] in pretrained_layers
-                        or pretrained_layers[0] is '*'
-                        or 'relative_position_index' not in k
-                        or 'attn_mask' not in k
-                )
+        if not os.path.isfile(pretrained):
+            return
+        pretrained_dict = torch.load(pretrained, map_location='cpu')
+        logging.info(f'=> loading pretrained model {pretrained}')
+        model_dict = self.state_dict()
+        pretrained_dict = {
+            k: v for k, v in pretrained_dict.items()
+            if k in model_dict.keys()
+        }
+        need_init_state_dict = {}
+        for k, v in pretrained_dict.items():
+            need_init = (
+                    k.split('.')[0] in pretrained_layers
+                    or pretrained_layers[0] is '*'
+                    or 'relative_position_index' not in k
+                    or 'attn_mask' not in k
+            )
 
-                if need_init:
-                    if verbose:
-                        logging.info(f'=> init {k} from {pretrained}')
+            if need_init:
+                if verbose:
+                    logging.info(f'=> init {k} from {pretrained}')
 
-                    if 'relative_position_bias_table' in k and v.size() != model_dict[k].size():
-                        relative_position_bias_table_pretrained = v
-                        relative_position_bias_table_current = model_dict[k]
-                        L1, nH1 = relative_position_bias_table_pretrained.size()
-                        L2, nH2 = relative_position_bias_table_current.size()
-                        if nH1 != nH2:
-                            logging.info(f"Error in loading {k}, passing")
-                        else:
-                            if L1 != L2:
-                                logging.info(
-                                    '=> load_pretrained: resized variant: {} to {}'
-                                        .format((L1, nH1), (L2, nH2))
-                                )
-                                S1 = int(L1 ** 0.5)
-                                S2 = int(L2 ** 0.5)
-                                relative_position_bias_table_pretrained_resized = torch.nn.functional.interpolate(
-                                    relative_position_bias_table_pretrained.permute(1, 0).view(1, nH1, S1, S1),
-                                    size=(S2, S2),
-                                    mode='bicubic')
-                                v = relative_position_bias_table_pretrained_resized.view(nH2, L2).permute(1, 0)
+                if 'relative_position_bias_table' in k and v.size() != model_dict[k].size():
+                    relative_position_bias_table_pretrained = v
+                    relative_position_bias_table_current = model_dict[k]
+                    L1, nH1 = relative_position_bias_table_pretrained.size()
+                    L2, nH2 = relative_position_bias_table_current.size()
+                    if nH1 != nH2:
+                        logging.info(f"Error in loading {k}, passing")
+                    elif L1 != L2:
+                        logging.info(
+                            f'=> load_pretrained: resized variant: {(L1, nH1)} to {(L2, nH2)}'
+                        )
+                        S1 = int(L1 ** 0.5)
+                        S2 = int(L2 ** 0.5)
+                        relative_position_bias_table_pretrained_resized = torch.nn.functional.interpolate(
+                            relative_position_bias_table_pretrained.permute(1, 0).view(1, nH1, S1, S1),
+                            size=(S2, S2),
+                            mode='bicubic')
+                        v = relative_position_bias_table_pretrained_resized.view(nH2, L2).permute(1, 0)
 
-                    if 'absolute_pos_embed' in k and v.size() != model_dict[k].size():
-                        absolute_pos_embed_pretrained = v
-                        absolute_pos_embed_current = model_dict[k]
-                        _, L1, C1 = absolute_pos_embed_pretrained.size()
-                        _, L2, C2 = absolute_pos_embed_current.size()
-                        if C1 != C1:
-                            logging.info(f"Error in loading {k}, passing")
-                        else:
-                            if L1 != L2:
-                                logging.info(
-                                    '=> load_pretrained: resized variant: {} to {}'
-                                        .format((1, L1, C1), (1, L2, C2))
-                                )
-                                S1 = int(L1 ** 0.5)
-                                S2 = int(L2 ** 0.5)
-                                absolute_pos_embed_pretrained = absolute_pos_embed_pretrained.reshape(-1, S1, S1, C1)
-                                absolute_pos_embed_pretrained = absolute_pos_embed_pretrained.permute(0, 3, 1, 2)
-                                absolute_pos_embed_pretrained_resized = torch.nn.functional.interpolate(
-                                    absolute_pos_embed_pretrained, size=(S2, S2), mode='bicubic')
-                                v = absolute_pos_embed_pretrained_resized.permute(0, 2, 3, 1).flatten(1, 2)
+                if 'absolute_pos_embed' in k and v.size() != model_dict[k].size():
+                    absolute_pos_embed_pretrained = v
+                    absolute_pos_embed_current = model_dict[k]
+                    _, L1, C1 = absolute_pos_embed_pretrained.size()
+                    _, L2, C2 = absolute_pos_embed_current.size()
+                    if C1 != C1:
+                        logging.info(f"Error in loading {k}, passing")
+                    elif L1 != L2:
+                        logging.info(
+                            f'=> load_pretrained: resized variant: {(1, L1, C1)} to {(1, L2, C2)}'
+                        )
+                        S1 = int(L1 ** 0.5)
+                        S2 = int(L2 ** 0.5)
+                        absolute_pos_embed_pretrained = absolute_pos_embed_pretrained.reshape(-1, S1, S1, C1)
+                        absolute_pos_embed_pretrained = absolute_pos_embed_pretrained.permute(0, 3, 1, 2)
+                        absolute_pos_embed_pretrained_resized = torch.nn.functional.interpolate(
+                            absolute_pos_embed_pretrained, size=(S2, S2), mode='bicubic')
+                        v = absolute_pos_embed_pretrained_resized.permute(0, 2, 3, 1).flatten(1, 2)
 
-                    need_init_state_dict[k] = v
-            self.load_state_dict(need_init_state_dict, strict=False)
+                need_init_state_dict[k] = v
+        self.load_state_dict(need_init_state_dict, strict=False)
 
     def freeze_pretrained_layers(self, frozen_layers=[]):
         for name, module in self.named_modules():
             if (
-                    name.split('.')[0] in frozen_layers
-                    or '.'.join(name.split('.')[0:2]) in frozen_layers
-                    or (len(frozen_layers) > 0 and frozen_layers[0] is '*')
+                name.split('.')[0] in frozen_layers
+                or '.'.join(name.split('.')[:2]) in frozen_layers
+                or (len(frozen_layers) > 0 and frozen_layers[0] is '*')
             ):
                 for _name, param in module.named_parameters():
                     param.requires_grad = False
-                logging.info(
-                    '=> set param {} requires grad to False'
-                        .format(name)
-                )
+                logging.info(f'=> set param {name} requires grad to False')
         for name, param in self.named_parameters():
             if (
                     name.split('.')[0] in frozen_layers
@@ -800,33 +788,30 @@ class SwinTransformer(nn.Module):
                     and param.requires_grad is True
             ):
                 param.requires_grad = False
-                logging.info(
-                    '=> set param {} requires grad to False'
-                        .format(name)
-                )
+                logging.info(f'=> set param {name} requires grad to False')
         return self
 
 
 def get_swin(is_teacher=False):
     args = get_args()
 
-    if args.swin_backbone_type == "tiny":
-        embed_dim = 96
-        depths = [2, 2, 6, 2]
-        num_heads = [3, 6, 12, 24]
-        drop_path_rate = 0.1
-    elif args.swin_backbone_type == 'h3':
+    if args.swin_backbone_type == 'h3':
         embed_dim = 384
         depths = [2, 2, 18, 2]
         num_heads = [6, 12, 24, 48]
         drop_path_rate = 0.2
+    elif args.swin_backbone_type == "tiny":
+        embed_dim = 96
+        depths = [2, 2, 6, 2]
+        num_heads = [3, 6, 12, 24]
+        drop_path_rate = 0.1
     else:
         embed_dim = 128
         depths = [2, 2, 18, 2]
         num_heads = [4, 8, 16, 32]
         drop_path_rate = 0.2
 
-    swin = SwinTransformer(
+    return SwinTransformer(
         img_size=224,
         in_chans=3,
         num_classes=1000,
@@ -844,6 +829,4 @@ def get_swin(is_teacher=False):
         ape=False,
         patch_norm=True,
     )
-
-    return swin
 

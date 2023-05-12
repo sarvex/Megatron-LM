@@ -82,8 +82,8 @@ def main():
 
     print(f"Vocab size: {tokenizer.vocab_size}")
     print(f"Output prefix: {args.output_prefix}")
-    output_bin_file = "{}.bin".format(args.output_prefix)
-    output_idx_file = "{}.idx".format(args.output_prefix)
+    output_bin_file = f"{args.output_prefix}.bin"
+    output_idx_file = f"{args.output_prefix}.idx"
     builder = indexed_dataset.make_builder(output_bin_file,
                                            impl=args.dataset_impl,
                                            vocab_size=tokenizer.vocab_size)
